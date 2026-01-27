@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -89,6 +90,8 @@ func Run(args []string, opts Options) error {
 		fmt.Printf("%s %s\n", cmdName, Version)
 		return nil
 	}
+
+	maybeSuggestBrewUpgrade(Version)
 
 	root := repoRoot
 	project := projectPath
@@ -689,4 +692,79 @@ func resolveInstallMode(cfg appConfig) installer.Mode {
 		return installer.ModeCopy
 	}
 	return installer.ModeSymlink
+}
+
+type brewInfo struct {
+	Formulae []struct {
+		Name     string `json:"name"`
+		Versions struct {
+			Stable string `json:"stable"`
+		} `json:"versions"`
+	} `json:"formulae"`
+}
+
+func maybeSuggestBrewUpgrade(current string) {
+	latest, err := brewStableVersion()
+	if err != nil || latest == "" || current == "" {
+		return
+	}
+	if compareVersions(current, latest) >= 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "A newer askill version (%s) is available. Run: brew update && brew upgrade askill\n", latest)
+}
+
+func brewStableVersion() (string, error) {
+	cmd := exec.Command("brew", "info", "--json=v2", "askill")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	var info brewInfo
+	if err := json.Unmarshal(output, &info); err != nil {
+		return "", err
+	}
+	for _, formula := range info.Formulae {
+		if formula.Name == "askill" {
+			return strings.TrimSpace(strings.TrimPrefix(formula.Versions.Stable, "v")), nil
+		}
+	}
+	return "", errors.New("askill formula not found")
+}
+
+func compareVersions(a, b string) int {
+	a = strings.TrimPrefix(strings.TrimSpace(a), "v")
+	b = strings.TrimPrefix(strings.TrimSpace(b), "v")
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+	maxLen := len(aParts)
+	if len(bParts) > maxLen {
+		maxLen = len(bParts)
+	}
+	for i := 0; i < maxLen; i++ {
+		var aVal, bVal int
+		if i < len(aParts) {
+			aVal = parseVersionPart(aParts[i])
+		}
+		if i < len(bParts) {
+			bVal = parseVersionPart(bParts[i])
+		}
+		if aVal < bVal {
+			return -1
+		}
+		if aVal > bVal {
+			return 1
+		}
+	}
+	return 0
+}
+
+func parseVersionPart(part string) int {
+	part = strings.TrimSpace(part)
+	part = strings.TrimLeft(part, "v")
+	n, err := strconv.Atoi(part)
+	if err != nil {
+		return 0
+	}
+	return n
 }
