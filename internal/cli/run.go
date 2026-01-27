@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"agent-skills/internal/installer"
 
@@ -703,11 +705,16 @@ type brewInfo struct {
 }
 
 func maybeUpgradeBanner(current string) string {
-	latest, err := brewStableVersion()
-	if err != nil || latest == "" || current == "" {
+	if current == "" {
 		return ""
 	}
-	if compareVersions(current, latest) >= 0 {
+	latest := ""
+	if githubLatest, err := githubLatestVersion(); err == nil {
+		latest = githubLatest
+	} else if brewLatest, err := brewStableVersion(); err == nil {
+		latest = brewLatest
+	}
+	if latest == "" || compareVersions(current, latest) >= 0 {
 		return ""
 	}
 	return fmt.Sprintf("A newer askill version (%s) is available. Run: brew update && brew upgrade askill", latest)
@@ -729,6 +736,35 @@ func brewStableVersion() (string, error) {
 		}
 	}
 	return "", errors.New("askill formula not found")
+}
+
+type githubTag struct {
+	Name string `json:"name"`
+}
+
+func githubLatestVersion() (string, error) {
+	client := http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/mbtz/agent-skills/tags?per_page=1", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github tags status: %s", resp.Status)
+	}
+	var tags []githubTag
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		return "", err
+	}
+	if len(tags) == 0 {
+		return "", errors.New("no tags found")
+	}
+	return strings.TrimSpace(strings.TrimPrefix(tags[0].Name, "v")), nil
 }
 
 func compareVersions(a, b string) int {
