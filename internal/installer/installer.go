@@ -27,10 +27,10 @@ type Skill struct {
 type TargetType string
 
 const (
-	TargetCodexGlobal  TargetType = "codex-global"
-	TargetClaudeGlobal TargetType = "claude-global"
+	TargetCodexGlobal   TargetType = "codex-global"
+	TargetClaudeGlobal  TargetType = "claude-global"
 	TargetClaudeProject TargetType = "claude-project"
-	TargetCursorGlobal TargetType = "cursor-global"
+	TargetCursorGlobal  TargetType = "cursor-global"
 	TargetCursorProject TargetType = "cursor-project"
 )
 
@@ -260,4 +260,8 @@ func parseSkillFrontmatter(path string) (string, string, error) {
 func existsDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func ExistsDir(path string) bool {
+	return existsDir(path)
 }

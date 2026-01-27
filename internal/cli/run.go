@@ -53,8 +53,10 @@ func Run(args []string, opts Options) error {
 		mode = installer.ModeSymlink
 	}
 
+	defaultRoot, defaultRootErr := detectRepoRoot()
+
 	if len(args) == 1 {
-		cfg, err := promptConfig()
+		cfg, err := promptConfigTUI(defaultRoot)
 		if err != nil {
 			return err
 		}
@@ -65,6 +67,12 @@ func Run(args []string, opts Options) error {
 
 	if *copyMode && *symlinkMode {
 		return errors.New("choose only one of --copy or --symlink")
+	}
+
+	if root == "" {
+		if defaultRootErr == nil && defaultRoot != "" {
+			root = defaultRoot
+		}
 	}
 
 	if root == "" {
@@ -165,24 +173,21 @@ type config struct {
 	mode    installer.Mode
 }
 
-func promptConfig() (config, error) {
-	reader := bufio.NewReader(os.Stdin)
+func promptConfigTUI(defaultRoot string) (config, error) {
 	cwd, _ := os.Getwd()
-
-	root, err := promptString(reader, "Skills repo path (enter for current dir): ", cwd)
+	root, err := promptSkillsRootTUI(defaultRoot, cwd)
 	if err != nil {
 		return config{}, err
 	}
 
-	project, err := promptString(reader, "Project path (enter to skip): ", "")
+	project, err := promptProjectPathTUI(cwd)
 	if err != nil {
 		return config{}, err
 	}
 
-	modeChoice := promptChoice("Install mode:", []string{"symlink", "copy"})
-	mode := installer.ModeSymlink
-	if modeChoice == 2 {
-		mode = installer.ModeCopy
+	mode, err := promptInstallModeTUI()
+	if err != nil {
+		return config{}, err
 	}
 
 	return config{
@@ -190,39 +195,6 @@ func promptConfig() (config, error) {
 		project: strings.TrimSpace(project),
 		mode:    mode,
 	}, nil
-}
-
-func promptString(reader *bufio.Reader, prompt, defaultValue string) (string, error) {
-	if defaultValue != "" {
-		fmt.Printf("%s[%s] ", prompt, defaultValue)
-	} else {
-		fmt.Print(prompt)
-	}
-	text, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return defaultValue, nil
-	}
-	return text, nil
-}
-
-func promptChoice(prompt string, items []string) int {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println(prompt)
-	for i, item := range items {
-		fmt.Printf("%d) %s\n", i+1, item)
-	}
-	fmt.Print("> ")
-	text, _ := reader.ReadString('\n')
-	text = strings.TrimSpace(text)
-	value, err := strconv.Atoi(text)
-	if err != nil || value < 1 || value > len(items) {
-		return 1
-	}
-	return value
 }
 
 func promptIndices(prompt string, items []string) []int {
@@ -251,6 +223,23 @@ func promptIndices(prompt string, items []string) []int {
 		indices = append(indices, value-1)
 	}
 	return indices
+}
+
+func detectRepoRoot() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(executable)
+	if err == nil {
+		executable = resolved
+	}
+	exeDir := filepath.Dir(executable)
+	sharedSkills := filepath.Clean(filepath.Join(exeDir, "..", "share", "askill", "skills"))
+	if installer.ExistsDir(sharedSkills) {
+		return filepath.Dir(sharedSkills), nil
+	}
+	return "", errors.New("no bundled skills path found")
 }
 
 func confirm(reader *bufio.Reader, prompt string) bool {
