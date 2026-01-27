@@ -62,6 +62,24 @@ Flags:
 - `-v`, `--version`: print version and exit
 - `-h`, `--help`: show help
 
+Config:
+
+```bash
+askill config
+askill config --init
+askill config --edit
+```
+
+Config file path: `~/.config/askill/config.json`
+
+Example:
+
+```json
+{
+  "repo_url": "https://github.com/mbtz/agent-skills"
+}
+```
+
 Release (updates version, tags, and Homebrew formula):
 
 ```bash

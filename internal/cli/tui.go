@@ -21,11 +21,11 @@ var (
 	defaultStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 )
 
-func selectIndicesTUI(title string, items []string, selected map[int]bool) ([]int, error) {
+func selectIndicesTUI(title string, items []string, selected map[int]bool, showDefaultLabel bool) ([]int, error) {
 	if len(items) == 0 {
 		return nil, errors.New("no items to select")
 	}
-	model := newMultiSelectModel(title, items, selected)
+	model := newMultiSelectModel(title, items, selected, showDefaultLabel)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -42,16 +42,17 @@ func selectIndicesTUI(title string, items []string, selected map[int]bool) ([]in
 }
 
 type multiSelectModel struct {
-	title     string
-	items     []string
-	cursor    int
-	selected  map[int]bool
-	defaults  map[int]bool
-	canceled  bool
-	confirmed bool
+	title            string
+	items            []string
+	cursor           int
+	selected         map[int]bool
+	defaults         map[int]bool
+	showDefaultLabel bool
+	canceled         bool
+	confirmed        bool
 }
 
-func newMultiSelectModel(title string, items []string, selected map[int]bool) multiSelectModel {
+func newMultiSelectModel(title string, items []string, selected map[int]bool, showDefaultLabel bool) multiSelectModel {
 	if selected == nil {
 		selected = make(map[int]bool)
 	}
@@ -60,10 +61,11 @@ func newMultiSelectModel(title string, items []string, selected map[int]bool) mu
 		defaults[idx] = true
 	}
 	return multiSelectModel{
-		title:    title,
-		items:    items,
-		selected: selected,
-		defaults: defaults,
+		title:            title,
+		items:            items,
+		selected:         selected,
+		defaults:         defaults,
+		showDefaultLabel: showDefaultLabel,
 	}
 }
 
@@ -118,7 +120,7 @@ func (m multiSelectModel) View() string {
 			check = selectedStyle.Render("x")
 		}
 		label := ""
-		if m.defaults[i] {
+		if m.showDefaultLabel && m.defaults[i] {
 			label = " " + defaultStyle.Render("default")
 		}
 		b.WriteString(fmt.Sprintf("%s [%s] %s%s\n", cursor, check, item, label))

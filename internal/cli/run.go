@@ -27,6 +27,10 @@ func Run(args []string, opts Options) error {
 		cmdName = filepath.Base(args[0])
 	}
 
+	if len(args) > 1 && args[1] == "config" {
+		return runConfigCommand(args[2:], cmdName)
+	}
+
 	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var repoRoot string
@@ -48,7 +52,8 @@ func Run(args []string, opts Options) error {
 
 	fs.Usage = func() {
 		out := fs.Output()
-		fmt.Fprintf(out, "Usage: %s [options]\n\n", cmdName)
+		fmt.Fprintf(out, "Usage: %s [options]\n", cmdName)
+		fmt.Fprintf(out, "       %s config [--init] [-e|--edit]\n\n", cmdName)
 		fmt.Fprintln(out, "Run without options to open the interactive TUI installer.")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Options:")
@@ -59,6 +64,12 @@ func Run(args []string, opts Options) error {
 		fmt.Fprintln(tw, "  -s, --symlink\tForce symlink mode")
 		fmt.Fprintln(tw, "  -v, --version\tPrint version and exit")
 		fmt.Fprintln(tw, "  -h, --help\tShow help")
+		_ = tw.Flush()
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Config command:")
+		tw = tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "  --init\tCreate config file with defaults")
+		fmt.Fprintln(tw, "  -e, --edit\tEdit config in $EDITOR/$VISUAL")
 		_ = tw.Flush()
 	}
 	if err := fs.Parse(args[1:]); err != nil {
@@ -167,7 +178,7 @@ func Run(args []string, opts Options) error {
 	var overwriteAll bool
 	selectedTargets := targets
 	if len(args) == 1 {
-		indices, err := selectIndicesTUI("Select install targets", targetsSummary(targets), defaultSelectAll(len(targets)))
+		indices, err := selectIndicesTUI("Select install targets", targetsSummary(targets), defaultSelectAll(len(targets)), false)
 		if err != nil {
 			if errors.Is(err, errCanceled) {
 				return nil
@@ -197,7 +208,7 @@ func Run(args []string, opts Options) error {
 	var indices []int
 	var skillsErr error
 	if len(args) == 1 {
-		indices, skillsErr = selectIndicesTUI("Select skills to install", skillsSummary(skills), defaultSelectAll(len(skills)))
+		indices, skillsErr = selectIndicesTUI("Select skills to install", skillsSummary(skills), defaultSelectAll(len(skills)), false)
 		if skillsErr != nil {
 			if errors.Is(skillsErr, errCanceled) {
 				return nil
@@ -482,4 +493,115 @@ func loadConfig() (appConfig, error) {
 		return appConfig{}, err
 	}
 	return cfg, nil
+}
+
+func runConfigCommand(args []string, cmdName string) error {
+	fs := flag.NewFlagSet(cmdName+" config", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var edit bool
+	var init bool
+	fs.BoolVar(&edit, "edit", false, "edit config in $EDITOR/$VISUAL")
+	fs.BoolVar(&edit, "e", false, "alias for --edit")
+	fs.BoolVar(&init, "init", false, "create config with defaults if missing")
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintf(out, "Usage: %s config [--init] [-e|--edit]\n\n", cmdName)
+		fmt.Fprintln(out, "Options:")
+		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "  --init\tCreate config file with defaults")
+		fmt.Fprintln(tw, "  -e, --edit\tEdit config in $EDITOR/$VISUAL")
+		fmt.Fprintln(tw, "  -h, --help\tShow help")
+		_ = tw.Flush()
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	configPath, err := configFilePath()
+	if err != nil {
+		return err
+	}
+
+	if init {
+		if err := ensureConfigFile(configPath); err != nil {
+			return err
+		}
+	}
+
+	if edit {
+		if err := ensureConfigFile(configPath); err != nil {
+			return err
+		}
+		return editConfigFile(configPath)
+	}
+
+	if _, err := os.Stat(configPath); errors.Is(err, os.ErrNotExist) {
+		fmt.Printf("Config not found at %s\n", configPath)
+		fmt.Println("Run `askill config --init` to create it.")
+		return nil
+	} else if err != nil {
+		return err
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if err := printConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("\nConfig path: %s\n", configPath)
+	return nil
+}
+
+func configFilePath() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "askill", "config.json"), nil
+}
+
+func ensureConfigFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	defaults := appConfig{RepoURL: ""}
+	data, err := json.MarshalIndent(defaults, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
+}
+
+func editConfigFile(path string) error {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		editor = "vi"
+	}
+	cmd := exec.Command(editor, path)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func printConfig(cfg appConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
 }
