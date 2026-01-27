@@ -91,8 +91,6 @@ func Run(args []string, opts Options) error {
 		return nil
 	}
 
-	maybeSuggestBrewUpgrade(Version)
-
 	root := repoRoot
 	project := projectPath
 	mode := installer.ModeSymlink
