@@ -1,137 +1,118 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 var errCanceled = errors.New("canceled")
-
-type multiSelect struct {
-	title    string
-	items    []string
-	cursor   int
-	selected map[int]bool
-}
 
 func selectIndicesTUI(title string, items []string) ([]int, error) {
 	if len(items) == 0 {
 		return nil, errors.New("no items to select")
 	}
-	restore, err := enterRawMode()
+	model := newMultiSelectModel(title, items)
+	program := tea.NewProgram(model, tea.WithAltScreen())
+	finalModel, err := program.Run()
 	if err != nil {
 		return nil, err
 	}
-	defer restore()
+	finalState, ok := finalModel.(multiSelectModel)
+	if !ok {
+		return nil, errors.New("unexpected TUI state")
+	}
+	if finalState.canceled {
+		return nil, errCanceled
+	}
+	return finalState.selectedIndices(), nil
+}
 
-	state := multiSelect{
+type multiSelectModel struct {
+	title     string
+	items     []string
+	cursor    int
+	selected  map[int]bool
+	canceled  bool
+	confirmed bool
+}
+
+func newMultiSelectModel(title string, items []string) multiSelectModel {
+	return multiSelectModel{
 		title:    title,
 		items:    items,
 		selected: make(map[int]bool),
 	}
-
-	render := func() {
-		var b strings.Builder
-		b.WriteString("\033[H\033[2J")
-		b.WriteString(state.title)
-		b.WriteString("\n\n")
-		for i, item := range state.items {
-			cursor := " "
-			if state.cursor == i {
-				cursor = ">"
-			}
-			check := " "
-			if state.selected[i] {
-				check = "x"
-			}
-			b.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, check, item))
-		}
-		b.WriteString("\n")
-		b.WriteString("j/k or ↑/↓ to move, space to select, a to toggle all, enter to confirm, q to quit\n")
-		fmt.Print(b.String())
-	}
-
-	render()
-	buf := make([]byte, 3)
-	for {
-		n, err := os.Stdin.Read(buf[:1])
-		if err != nil || n == 0 {
-			return nil, errors.New("failed to read input")
-		}
-		b := buf[0]
-		switch b {
-		case 'q':
-			fmt.Print("\n")
-			return nil, errCanceled
-		case 'j':
-			if state.cursor < len(state.items)-1 {
-				state.cursor++
-			}
-		case 'k':
-			if state.cursor > 0 {
-				state.cursor--
-			}
-		case ' ':
-			state.selected[state.cursor] = !state.selected[state.cursor]
-		case 'a':
-			if len(state.selected) == len(state.items) {
-				state.selected = make(map[int]bool)
-			} else {
-				for i := range state.items {
-					state.selected[i] = true
-				}
-			}
-		case '\r', '\n':
-			fmt.Print("\n")
-			var out []int
-			for i := range state.items {
-				if state.selected[i] {
-					out = append(out, i)
-				}
-			}
-			return out, nil
-		case 0x1b:
-			n, _ := os.Stdin.Read(buf[:2])
-			if n == 2 && buf[0] == '[' {
-				switch buf[1] {
-				case 'A':
-					if state.cursor > 0 {
-						state.cursor--
-					}
-				case 'B':
-					if state.cursor < len(state.items)-1 {
-						state.cursor++
-					}
-				}
-			}
-		}
-		render()
-	}
 }
 
-func enterRawMode() (func(), error) {
-	cmd := exec.Command("stty", "-g")
-	cmd.Stdin = os.Stdin
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("capture terminal state: %w", err)
+func (m multiSelectModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			m.canceled = true
+			return m, tea.Quit
+		case "enter":
+			m.confirmed = true
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.items)-1 {
+				m.cursor++
+			}
+		case " ":
+			m.selected[m.cursor] = !m.selected[m.cursor]
+		case "a":
+			if len(m.selected) == len(m.items) {
+				m.selected = make(map[int]bool)
+			} else {
+				for i := range m.items {
+					m.selected[i] = true
+				}
+			}
+		}
 	}
-	original := strings.TrimSpace(string(output))
-	raw := exec.Command("stty", "raw", "-echo")
-	raw.Stdin = os.Stdin
-	if err := raw.Run(); err != nil {
-		return nil, fmt.Errorf("enter raw mode: %w", err)
+	return m, nil
+}
+
+func (m multiSelectModel) View() string {
+	var b strings.Builder
+	b.WriteString(m.title)
+	b.WriteString("\n\n")
+	for i, item := range m.items {
+		cursor := " "
+		if m.cursor == i {
+			cursor = ">"
+		}
+		check := " "
+		if m.selected[i] {
+			check = "x"
+		}
+		b.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, check, item))
 	}
-	restore := func() {
-		restoreCmd := exec.Command("stty", original)
-		restoreCmd.Stdin = os.Stdin
-		restoreCmd.Stdout = &bytes.Buffer{}
-		restoreCmd.Stderr = &bytes.Buffer{}
-		_ = restoreCmd.Run()
+	b.WriteString("\n")
+	b.WriteString("j/k or ↑/↓ to move, space to select, a to toggle all, enter to confirm, q to quit\n")
+	return b.String()
+}
+
+func (m multiSelectModel) selectedIndices() []int {
+	if len(m.selected) == 0 {
+		return nil
 	}
-	return restore, nil
+	out := make([]int, 0, len(m.selected))
+	for i := range m.items {
+		if m.selected[i] {
+			out = append(out, i)
+		}
+	}
+	return out
 }
