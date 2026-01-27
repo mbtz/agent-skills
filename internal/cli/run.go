@@ -44,11 +44,32 @@ func Run(args []string, opts Options) error {
 		return nil
 	}
 
+	root := *repoRoot
+	project := *projectPath
+	mode := installer.ModeSymlink
+	if *copyMode {
+		mode = installer.ModeCopy
+	}
+	if *symlinkMode {
+		mode = installer.ModeSymlink
+	}
+	all := *allSkills
+
+	if len(args) == 1 {
+		cfg, err := promptConfig()
+		if err != nil {
+			return err
+		}
+		root = cfg.root
+		project = cfg.project
+		mode = cfg.mode
+		all = cfg.all
+	}
+
 	if *copyMode && *symlinkMode {
 		return errors.New("choose only one of --copy or --symlink")
 	}
 
-	root := *repoRoot
 	if root == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -68,17 +89,9 @@ func Run(args []string, opts Options) error {
 		return fmt.Errorf("determine home directory: %w", err)
 	}
 
-	targets := installer.DiscoverTargets(homeDir, *projectPath)
+	targets := installer.DiscoverTargets(homeDir, project)
 	if len(targets) == 0 {
 		return fmt.Errorf("no install targets found under %s. Create a harness folder or pass --project", homeDir)
-	}
-
-	mode := installer.ModeSymlink
-	if *copyMode {
-		mode = installer.ModeCopy
-	}
-	if *symlinkMode {
-		mode = installer.ModeSymlink
 	}
 
 	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
@@ -93,7 +106,7 @@ func Run(args []string, opts Options) error {
 	}
 
 	selectedSkills := skills
-	if !*allSkills {
+	if !all {
 		indices := promptIndices("Select skills to install (e.g. 1,2,5):", skillsSummary(skills))
 		selectedSkills = filterSkills(skills, indices)
 		if len(selectedSkills) == 0 {
@@ -125,6 +138,77 @@ func Run(args []string, opts Options) error {
 	}
 
 	return nil
+}
+
+type config struct {
+	root    string
+	project string
+	mode    installer.Mode
+	all     bool
+}
+
+func promptConfig() (config, error) {
+	reader := bufio.NewReader(os.Stdin)
+	cwd, _ := os.Getwd()
+
+	root, err := promptString(reader, "Skills repo path (enter for current dir): ", cwd)
+	if err != nil {
+		return config{}, err
+	}
+
+	project, err := promptString(reader, "Project path (enter to skip): ", "")
+	if err != nil {
+		return config{}, err
+	}
+
+	modeChoice := promptChoice("Install mode:", []string{"symlink", "copy"})
+	mode := installer.ModeSymlink
+	if modeChoice == 2 {
+		mode = installer.ModeCopy
+	}
+
+	allChoice := promptChoice("Install all skills without prompt?", []string{"no", "yes"})
+	all := allChoice == 2
+
+	return config{
+		root:    strings.TrimSpace(root),
+		project: strings.TrimSpace(project),
+		mode:    mode,
+		all:     all,
+	}, nil
+}
+
+func promptString(reader *bufio.Reader, prompt, defaultValue string) (string, error) {
+	if defaultValue != "" {
+		fmt.Printf("%s[%s] ", prompt, defaultValue)
+	} else {
+		fmt.Print(prompt)
+	}
+	text, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return defaultValue, nil
+	}
+	return text, nil
+}
+
+func promptChoice(prompt string, items []string) int {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println(prompt)
+	for i, item := range items {
+		fmt.Printf("%d) %s\n", i+1, item)
+	}
+	fmt.Print("> ")
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+	value, err := strconv.Atoi(text)
+	if err != nil || value < 1 || value > len(items) {
+		return 1
+	}
+	return value
 }
 
 func promptIndices(prompt string, items []string) []int {

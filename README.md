@@ -5,7 +5,26 @@ that installs them into supported harnesses.
 
 ### CLI: askill
 
-Build:
+Homebrew (tap + install):
+
+```bash
+brew tap mbtz/agent-skills
+brew install askill
+```
+
+Upgrade:
+
+```bash
+brew upgrade askill
+```
+
+Interactive (default):
+
+```bash
+askill
+```
+
+From source:
 
 ```bash
 go build ./cmd/askill
