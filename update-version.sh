@@ -46,6 +46,9 @@ if [[ -n "$(git -C "$tap_repo" status --porcelain)" ]]; then
   die "tap repo is dirty; commit or stash before running"
 fi
 
+info "Tidying Go modules with trusted proxy"
+GOPROXY="https://proxy.golang.org,direct" GOSUMDB="sum.golang.org" go mod tidy
+
 branch="$(git rev-parse --abbrev-ref HEAD)"
 tap_branch="$(git -C "$tap_repo" rev-parse --abbrev-ref HEAD)"
 tag="v${new_version}"
@@ -56,7 +59,7 @@ perl -0pi -e "s/^const Version = \".*\"/const Version = \"${new_version}\"/m" "$
 if git diff --quiet -- "$cli_file"; then
   info "CLI version already set to ${new_version}"
 else
-  git add "$cli_file"
+  git add "$cli_file" go.mod go.sum
   git commit -m "Bump version to ${tag}"
 fi
 
