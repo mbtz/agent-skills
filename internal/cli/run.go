@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -54,15 +56,48 @@ func Run(args []string, opts Options) error {
 	}
 
 	defaultRoot, defaultRootErr := detectRepoRoot()
+	cfg, cfgErr := loadConfig()
+	if len(args) == 1 && cfgErr != nil {
+		return cfgErr
+	}
 
 	if len(args) == 1 {
-		cfg, err := promptConfigTUI(defaultRoot)
+		advanced, err := promptInstallFlowTUI()
 		if err != nil {
 			return err
 		}
-		root = cfg.root
-		project = cfg.project
-		mode = cfg.mode
+
+		if !advanced {
+			if defaultRootErr == nil && defaultRoot != "" {
+				root = defaultRoot
+			} else {
+				cwd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("get working directory: %w", err)
+				}
+				root = cwd
+			}
+			mode = installer.ModeSymlink
+			project = ""
+		} else {
+			selection, err := promptSourceSelectionTUI(defaultRoot, cfg)
+			if err != nil {
+				return err
+			}
+			root = selection.root
+			if selection.cleanup != nil {
+				defer selection.cleanup()
+			}
+			cfgPrompt, err := promptConfigTUI(root)
+			if err != nil {
+				return err
+			}
+			root = cfgPrompt.root
+			project = cfgPrompt.project
+			mode = cfgPrompt.mode
+		}
+	} else if cfgErr != nil {
+		return cfgErr
 	}
 
 	if *copyMode && *symlinkMode {
@@ -101,21 +136,29 @@ func Run(args []string, opts Options) error {
 
 	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
 
+	var overwriteAll bool
 	selectedTargets := targets
-	if len(targets) > 1 {
-		var indices []int
-		var err error
-		if len(args) == 1 {
-			indices, err = selectIndicesTUI("Select install targets", targetsSummary(targets))
-			if err != nil {
-				if errors.Is(err, errCanceled) {
-					return nil
-				}
-				return err
+	if len(args) == 1 {
+		indices, err := selectIndicesTUI("Select install targets", targetsSummary(targets), defaultSelectAll(len(targets)))
+		if err != nil {
+			if errors.Is(err, errCanceled) {
+				return nil
 			}
-		} else {
-			indices = promptIndices("Select install targets (e.g. 1,3):", targetsSummary(targets))
+			return err
 		}
+		selectedTargets = filterTargets(targets, indices)
+		if len(selectedTargets) == 0 {
+			return errors.New("no targets selected")
+		}
+		overwriteAll, err = promptOverwriteTUI()
+		if err != nil {
+			if errors.Is(err, errCanceled) {
+				return nil
+			}
+			return err
+		}
+	} else if len(targets) > 1 {
+		indices := promptIndices("Select install targets (e.g. 1,3):", targetsSummary(targets))
 		selectedTargets = filterTargets(targets, indices)
 		if len(selectedTargets) == 0 {
 			return errors.New("no targets selected")
@@ -126,7 +169,7 @@ func Run(args []string, opts Options) error {
 	var indices []int
 	var skillsErr error
 	if len(args) == 1 {
-		indices, skillsErr = selectIndicesTUI("Select skills to install", skillsSummary(skills))
+		indices, skillsErr = selectIndicesTUI("Select skills to install", skillsSummary(skills), defaultSelectAll(len(skills)))
 		if skillsErr != nil {
 			if errors.Is(skillsErr, errCanceled) {
 				return nil
@@ -149,7 +192,12 @@ func Run(args []string, opts Options) error {
 		for _, skill := range selectedSkills {
 			dest := filepath.Join(target.Path, filepath.Base(skill.Path))
 			if _, err := os.Stat(dest); err == nil {
-				if !confirm(reader, fmt.Sprintf("%s exists in %s. Overwrite? [y/N]: ", filepath.Base(skill.Path), target.Label)) {
+				if len(args) == 1 {
+					if !overwriteAll {
+						fmt.Printf("Skipping %s for %s\n", skill.Name, target.Label)
+						continue
+					}
+				} else if !confirm(reader, fmt.Sprintf("%s exists in %s. Overwrite? [y/N]: ", filepath.Base(skill.Path), target.Label)) {
 					fmt.Printf("Skipping %s for %s\n", skill.Name, target.Label)
 					continue
 				}
@@ -173,13 +221,17 @@ type config struct {
 	mode    installer.Mode
 }
 
-func promptConfigTUI(defaultRoot string) (config, error) {
-	cwd, _ := os.Getwd()
-	root, err := promptSkillsRootTUI(defaultRoot, cwd)
-	if err != nil {
-		return config{}, err
-	}
+type appConfig struct {
+	RepoURL string `json:"repo_url"`
+}
 
+type configSelection struct {
+	root    string
+	cleanup func()
+}
+
+func promptConfigTUI(root string) (config, error) {
+	cwd, _ := os.Getwd()
 	project, err := promptProjectPathTUI(cwd)
 	if err != nil {
 		return config{}, err
@@ -297,4 +349,109 @@ func filterSkills(skills []installer.Skill, indices []int) []installer.Skill {
 		}
 	}
 	return out
+}
+
+func defaultSelectAll(count int) map[int]bool {
+	selected := make(map[int]bool, count)
+	for i := 0; i < count; i++ {
+		selected[i] = true
+	}
+	return selected
+}
+
+func promptInstallFlowTUI() (bool, error) {
+	items := []string{
+		"Default install (bundled skills, symlink, no project path)",
+		"Advanced (choose source, project path, install mode)",
+	}
+	idx, err := selectIndexTUI("Install mode", items)
+	if err != nil {
+		return false, err
+	}
+	return idx == 1, nil
+}
+
+func promptSourceSelectionTUI(defaultRoot string, cfg appConfig) (configSelection, error) {
+	cwd, _ := os.Getwd()
+	root, err := promptSkillsRootTUI(defaultRoot, cfg, cwd)
+	if err != nil {
+		return configSelection{}, err
+	}
+	if root == "" {
+		return configSelection{}, errors.New("no skills source selected")
+	}
+	resolved, cleanup, err := resolveSkillsRoot(root, cfg)
+	if err != nil {
+		return configSelection{}, err
+	}
+	return configSelection{root: resolved, cleanup: cleanup}, nil
+}
+
+func resolveSkillsRoot(root string, cfg appConfig) (string, func(), error) {
+	if strings.HasPrefix(root, "github:") {
+		repo := strings.TrimSpace(strings.TrimPrefix(root, "github:"))
+		if repo == "" {
+			return "", nil, errors.New("empty GitHub repo")
+		}
+		return cloneRepo(repo)
+	}
+	if strings.HasPrefix(root, "repo-url:") {
+		repo := strings.TrimSpace(strings.TrimPrefix(root, "repo-url:"))
+		if repo == "" {
+			return "", nil, errors.New("empty repo URL")
+		}
+		return cloneRepo(repo)
+	}
+	return root, nil, nil
+}
+
+func cloneRepo(repo string) (string, func(), error) {
+	repoURL := normalizeRepoURL(repo)
+	tempDir, err := os.MkdirTemp("", "askill-repo-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		_ = os.RemoveAll(tempDir)
+		return "", nil, fmt.Errorf("clone %s: %w", repoURL, err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tempDir) }
+	return tempDir, cleanup, nil
+}
+
+func normalizeRepoURL(repo string) string {
+	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "git@") {
+		return repo
+	}
+	if strings.HasPrefix(repo, "github.com/") {
+		return "https://" + repo + ".git"
+	}
+	if strings.Contains(repo, "/") {
+		return "https://github.com/" + repo + ".git"
+	}
+	return repo
+}
+
+func loadConfig() (appConfig, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return appConfig{}, err
+	}
+	path := filepath.Join(configDir, "askill", "config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return appConfig{}, nil
+		}
+		return appConfig{}, err
+	}
+	var cfg appConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return appConfig{}, err
+	}
+	return cfg, nil
 }

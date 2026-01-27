@@ -20,11 +20,11 @@ var (
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 )
 
-func selectIndicesTUI(title string, items []string) ([]int, error) {
+func selectIndicesTUI(title string, items []string, selected map[int]bool) ([]int, error) {
 	if len(items) == 0 {
 		return nil, errors.New("no items to select")
 	}
-	model := newMultiSelectModel(title, items)
+	model := newMultiSelectModel(title, items, selected)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -49,11 +49,14 @@ type multiSelectModel struct {
 	confirmed bool
 }
 
-func newMultiSelectModel(title string, items []string) multiSelectModel {
+func newMultiSelectModel(title string, items []string, selected map[int]bool) multiSelectModel {
+	if selected == nil {
+		selected = make(map[int]bool)
+	}
 	return multiSelectModel{
 		title:    title,
 		items:    items,
-		selected: make(map[int]bool),
+		selected: selected,
 	}
 }
 
@@ -304,7 +307,7 @@ func (m textInputModel) View() string {
 	return b.String()
 }
 
-func promptSkillsRootTUI(defaultRoot, cwd string) (string, error) {
+func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string, error) {
 	items := []string{}
 	paths := []string{}
 	labels := []string{}
@@ -314,9 +317,17 @@ func promptSkillsRootTUI(defaultRoot, cwd string) (string, error) {
 		paths = append(paths, defaultRoot)
 		labels = append(labels, "bundled")
 	}
+	if cfg.RepoURL != "" {
+		items = append(items, fmt.Sprintf("GitHub repo (configured: %s)", cfg.RepoURL))
+		paths = append(paths, "repo-url:"+cfg.RepoURL)
+		labels = append(labels, "repo-url")
+	}
 	items = append(items, fmt.Sprintf("Current directory (%s)", cwd))
 	paths = append(paths, cwd)
 	labels = append(labels, "cwd")
+	items = append(items, "Custom GitHub repo URL")
+	paths = append(paths, "")
+	labels = append(labels, "repo-url-custom")
 	items = append(items, "Custom path")
 	paths = append(paths, "")
 	labels = append(labels, "custom")
@@ -329,6 +340,12 @@ func promptSkillsRootTUI(defaultRoot, cwd string) (string, error) {
 		return "", errors.New("invalid selection")
 	}
 	switch labels[idx] {
+	case "repo-url-custom":
+		value, err := textInputTUI("GitHub repo", "Enter repo URL or owner/name:", "")
+		if err != nil {
+			return "", err
+		}
+		return "repo-url:" + value, nil
 	case "custom":
 		return textInputTUI("Skills repo path", "Enter path to repo (folder containing skills/):", cwd)
 	default:
@@ -369,4 +386,16 @@ func promptInstallModeTUI() (installer.Mode, error) {
 		return installer.ModeCopy, nil
 	}
 	return installer.ModeSymlink, nil
+}
+
+func promptOverwriteTUI() (bool, error) {
+	items := []string{
+		"Overwrite existing skills",
+		"Skip existing skills",
+	}
+	idx, err := selectIndexTUI("Overwrite existing skills?", items)
+	if err != nil {
+		return false, err
+	}
+	return idx == 0, nil
 }
