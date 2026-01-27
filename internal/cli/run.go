@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"agent-skills/internal/installer"
 )
@@ -28,11 +29,36 @@ func Run(args []string, opts Options) error {
 
 	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	repoRoot := fs.String("repo", "", "path to skills repo (defaults to current directory)")
-	projectPath := fs.String("project", "", "project path for project-local installs")
-	copyMode := fs.Bool("copy", false, "copy files instead of symlink")
-	symlinkMode := fs.Bool("symlink", false, "force symlink mode")
-	showVersion := fs.Bool("version", false, "print version and exit")
+	var repoRoot string
+	var projectPath string
+	var copyMode bool
+	var symlinkMode bool
+	var showVersion bool
+
+	fs.StringVar(&repoRoot, "repo", "", "path to skills repo (defaults to current directory)")
+	fs.StringVar(&repoRoot, "r", "", "alias for --repo")
+	fs.StringVar(&projectPath, "project", "", "project path for project-local installs")
+	fs.StringVar(&projectPath, "p", "", "alias for --project")
+	fs.BoolVar(&copyMode, "copy", false, "copy files instead of symlink")
+	fs.BoolVar(&copyMode, "c", false, "alias for --copy")
+	fs.BoolVar(&symlinkMode, "symlink", false, "force symlink mode")
+	fs.BoolVar(&symlinkMode, "s", false, "alias for --symlink")
+	fs.BoolVar(&showVersion, "version", false, "print version and exit")
+	fs.BoolVar(&showVersion, "v", false, "alias for --version")
+
+	fs.Usage = func() {
+		out := fs.Output()
+		fmt.Fprintf(out, "Usage: %s [options]\n\n", cmdName)
+		fmt.Fprintln(out, "Options:")
+		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "  -r, --repo\tPath to skills repo (defaults to current directory)")
+		fmt.Fprintln(tw, "  -p, --project\tProject path for project-local installs")
+		fmt.Fprintln(tw, "  -c, --copy\tCopy files instead of symlink")
+		fmt.Fprintln(tw, "  -s, --symlink\tForce symlink mode")
+		fmt.Fprintln(tw, "  -v, --version\tPrint version and exit")
+		fmt.Fprintln(tw, "  -h, --help\tShow help")
+		_ = tw.Flush()
+	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -45,8 +71,8 @@ func Run(args []string, opts Options) error {
 		return nil
 	}
 
-	root := *repoRoot
-	project := *projectPath
+	root := repoRoot
+	project := projectPath
 	mode := installer.ModeSymlink
 	if *copyMode {
 		mode = installer.ModeCopy

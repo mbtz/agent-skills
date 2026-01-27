@@ -51,6 +51,15 @@ Copy mode:
 ./askill --copy --project /path/to/your/project
 ```
 
+Flags:
+
+- `-r`, `--repo`: path to skills repo (defaults to current directory)
+- `-p`, `--project`: project path for project-local installs
+- `-c`, `--copy`: copy files instead of symlink
+- `-s`, `--symlink`: force symlink mode
+- `-v`, `--version`: print version and exit
+- `-h`, `--help`: show help
+
 Release (updates version, tags, and Homebrew formula):
 
 ```bash
