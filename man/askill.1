@@ -1,0 +1,100 @@
+.TH ASKILL 1 "January 2026" "askill" "User Commands"
+.SH NAME
+askill \- install and manage agent skills across harnesses
+.SH SYNOPSIS
+.B askill
+.RI [ options ]
+.PP
+.B askill config
+.RI [ --init ]
+.RI [ -e | --edit ]
+.SH DESCRIPTION
+askill installs SKILL.md based skills into supported harnesses.
+Running
+.B askill
+without options opens the interactive TUI installer.
+.SH OPTIONS
+.TP
+.BR \-r ", " \-\-repo " " \fIPATH\fR
+Path to skills repo (defaults to current directory).
+.TP
+.BR \-p ", " \-\-project " " \fIPATH\fR
+Project path for project-local installs.
+.TP
+.BR \-c ", " \-\-copy
+Copy files instead of symlink.
+.TP
+.BR \-s ", " \-\-symlink
+Force symlink mode.
+.TP
+.BR \-v ", " \-\-version
+Print version and exit.
+.TP
+.BR \-h ", " \-\-help
+Show help.
+.SH CONFIG COMMAND
+.TP
+.B askill config
+Print the current config and its path.
+.TP
+.B \-\-init
+Create the config file with defaults if it does not exist.
+.TP
+.BR \-e ", " \-\-edit
+Open the config file in $EDITOR or $VISUAL (falls back to vi).
+.SH CONFIG FILE
+Config file path:
+.IR ~/.config/askill/config.toml
+.PP
+Allowed options:
+.TP
+.B skill-repo-path
+Where to read skills from. Accepted values:
+.RS
+.IP \(bu 2
+.B bundled
+Use the bundled Homebrew-installed skills (default when available).
+.IP \(bu 2
+.B cwd
+Use the current working directory.
+.IP \(bu 2
+Absolute or relative path to a repo containing a
+.B skills/
+folder.
+.IP \(bu 2
+GitHub repo URL or
+.B owner/name
+shorthand, which will be cloned to a temporary directory.
+.RE
+.TP
+.B project-choice
+Default project selection in the TUI. Accepted values:
+.BR skip ", " cwd ", " custom .
+.TP
+.B project-path
+Project path to use when
+.B project-choice
+is
+.BR custom .
+.TP
+.B install-mode
+Default install mode. Accepted values:
+.BR symlink " or " copy .
+.SH EXAMPLES
+.PP
+Initialize config:
+.PP
+.nf
+askill config --init
+.fi
+.PP
+Set config (example):
+.PP
+.nf
+skill-repo-path = "https://github.com/mbtz/agent-skills"
+project-choice = "skip"
+project-path = ""
+install-mode = "symlink"
+.fi
+.SH SEE ALSO
+.BR askill (1)
