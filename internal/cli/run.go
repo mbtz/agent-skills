@@ -66,7 +66,7 @@ func Run(args []string, opts Options) error {
 		return err
 	}
 
-	if *showVersion {
+	if showVersion {
 		fmt.Printf("%s %s\n", cmdName, Version)
 		return nil
 	}
@@ -74,10 +74,10 @@ func Run(args []string, opts Options) error {
 	root := repoRoot
 	project := projectPath
 	mode := installer.ModeSymlink
-	if *copyMode {
+	if copyMode {
 		mode = installer.ModeCopy
 	}
-	if *symlinkMode {
+	if symlinkMode {
 		mode = installer.ModeSymlink
 	}
 
@@ -126,7 +126,7 @@ func Run(args []string, opts Options) error {
 		return cfgErr
 	}
 
-	if *copyMode && *symlinkMode {
+	if copyMode && symlinkMode {
 		return errors.New("choose only one of --copy or --symlink")
 	}
 
