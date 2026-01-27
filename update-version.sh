@@ -47,6 +47,8 @@ if [[ -n "$(git -C "$tap_repo" status --porcelain)" ]]; then
 fi
 
 info "Tidying Go modules with trusted proxy"
+rm -f go.sum
+GOPROXY="https://proxy.golang.org,direct" GOSUMDB="sum.golang.org" go clean -modcache
 GOPROXY="https://proxy.golang.org,direct" GOSUMDB="sum.golang.org" go mod tidy
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
