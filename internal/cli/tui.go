@@ -19,6 +19,7 @@ var (
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	defaultStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
+	warningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 )
 
 func selectIndicesTUI(title string, items []string, selected map[int]bool, showDefaultLabel bool) ([]int, error) {
@@ -144,11 +145,11 @@ func (m multiSelectModel) selectedIndices() []int {
 	return out
 }
 
-func selectIndexTUI(title string, items []string, defaultIndex int) (int, error) {
+func selectIndexTUI(title string, items []string, defaultIndex int, banner string) (int, error) {
 	if len(items) == 0 {
 		return -1, errors.New("no items to select")
 	}
-	model := newSingleSelectModel(title, items, defaultIndex)
+	model := newSingleSelectModel(title, items, defaultIndex, banner)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -170,10 +171,11 @@ type singleSelectModel struct {
 	cursor        int
 	selectedIndex int
 	defaultIndex  int
+	banner        string
 	canceled      bool
 }
 
-func newSingleSelectModel(title string, items []string, defaultIndex int) singleSelectModel {
+func newSingleSelectModel(title string, items []string, defaultIndex int, banner string) singleSelectModel {
 	if defaultIndex < 0 || defaultIndex >= len(items) {
 		defaultIndex = 0
 	}
@@ -182,6 +184,7 @@ func newSingleSelectModel(title string, items []string, defaultIndex int) single
 		items:         items,
 		selectedIndex: -1,
 		defaultIndex:  defaultIndex,
+		banner:        banner,
 	}
 }
 
@@ -214,6 +217,10 @@ func (m singleSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m singleSelectModel) View() string {
 	var b strings.Builder
+	if strings.TrimSpace(m.banner) != "" {
+		b.WriteString(warningStyle.Render(m.banner))
+		b.WriteString("\n\n")
+	}
 	b.WriteString(titleStyle.Render(m.title))
 	b.WriteString("\n\n")
 	for i, item := range m.items {
@@ -355,7 +362,7 @@ func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string,
 	labels = append(labels, "custom")
 
 	defaultIndex := defaultSkillsSourceIndex(cfg, labels)
-	idx, err := selectIndexTUI("Select skills source", items, defaultIndex)
+	idx, err := selectIndexTUI("Select skills source", items, defaultIndex, "")
 	if err != nil {
 		return "", err
 	}
@@ -382,7 +389,7 @@ func promptProjectPathTUI(cwd string, cfg appConfig) (string, error) {
 		fmt.Sprintf("Use current directory (%s)", cwd),
 		"Custom project path",
 	}
-	idx, err := selectIndexTUI("Project path", items, defaultProjectChoiceIndex(cfg))
+	idx, err := selectIndexTUI("Project path", items, defaultProjectChoiceIndex(cfg), "")
 	if err != nil {
 		return "", err
 	}
@@ -405,7 +412,7 @@ func promptInstallModeTUI(cfg appConfig) (installer.Mode, error) {
 		"Symlink (recommended)",
 		"Copy files",
 	}
-	idx, err := selectIndexTUI("Install mode", items, defaultInstallModeIndex(cfg))
+	idx, err := selectIndexTUI("Install mode", items, defaultInstallModeIndex(cfg), "")
 	if err != nil {
 		return "", err
 	}
@@ -420,7 +427,7 @@ func promptOverwriteTUI() (bool, error) {
 		"Skip existing skills",
 		"Overwrite existing skills",
 	}
-	idx, err := selectIndexTUI("Overwrite existing skills?", items, 0)
+	idx, err := selectIndexTUI("Overwrite existing skills?", items, 0, "")
 	if err != nil {
 		return false, err
 	}
