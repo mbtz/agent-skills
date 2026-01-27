@@ -744,10 +744,11 @@ type githubTag struct {
 
 func githubLatestVersion() (string, error) {
 	client := http.Client{Timeout: 2 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/mbtz/agent-skills/tags?per_page=1", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/mbtz/agent-skills/tags?per_page=100", nil)
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("User-Agent", "askill")
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -764,7 +765,17 @@ func githubLatestVersion() (string, error) {
 	if len(tags) == 0 {
 		return "", errors.New("no tags found")
 	}
-	return strings.TrimSpace(strings.TrimPrefix(tags[0].Name, "v")), nil
+	latest := strings.TrimSpace(strings.TrimPrefix(tags[0].Name, "v"))
+	for _, tag := range tags[1:] {
+		name := strings.TrimSpace(strings.TrimPrefix(tag.Name, "v"))
+		if compareVersions(name, latest) > 0 {
+			latest = name
+		}
+	}
+	if latest == "" {
+		return "", errors.New("no valid tag versions found")
+	}
+	return latest, nil
 }
 
 func compareVersions(a, b string) int {
