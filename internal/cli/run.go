@@ -124,7 +124,8 @@ func Run(args []string, opts Options) error {
 		project = resolveProjectPath(defaultCfg, cwd)
 		mode = resolveInstallMode(defaultCfg)
 	} else if len(args) == 1 {
-		advanced, err := promptInstallFlowTUI()
+		upgradeBanner := maybeUpgradeBanner(Version)
+		advanced, err := promptInstallFlowTUI(upgradeBanner)
 		if err != nil {
 			return err
 		}
@@ -442,12 +443,12 @@ func defaultSelectAll(count int) map[int]bool {
 	return selected
 }
 
-func promptInstallFlowTUI() (bool, error) {
+func promptInstallFlowTUI(banner string) (bool, error) {
 	items := []string{
 		"Default install (bundled skills, symlink, no project path)",
 		"Advanced (choose source, project path, install mode)",
 	}
-	idx, err := selectIndexTUI("Install mode", items, 0)
+	idx, err := selectIndexTUI("Install mode", items, 0, banner)
 	if err != nil {
 		return false, err
 	}
