@@ -336,16 +336,16 @@ func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string,
 
 	if defaultRoot != "" {
 		items = append(items, fmt.Sprintf("Bundled skills (%s)", defaultRoot))
-		paths = append(paths, defaultRoot)
+		paths = append(paths, "bundled")
 		labels = append(labels, "bundled")
 	}
-	if cfg.RepoURL != "" {
-		items = append(items, fmt.Sprintf("GitHub repo (configured: %s)", cfg.RepoURL))
-		paths = append(paths, "repo-url:"+cfg.RepoURL)
-		labels = append(labels, "repo-url")
+	if cfg.SkillRepoPath != "" && cfg.SkillRepoPath != "bundled" && cfg.SkillRepoPath != "cwd" {
+		items = append(items, fmt.Sprintf("Configured skill repo (%s)", cfg.SkillRepoPath))
+		paths = append(paths, cfg.SkillRepoPath)
+		labels = append(labels, "configured")
 	}
 	items = append(items, fmt.Sprintf("Current directory (%s)", cwd))
-	paths = append(paths, cwd)
+	paths = append(paths, "cwd")
 	labels = append(labels, "cwd")
 	items = append(items, "Custom GitHub repo URL")
 	paths = append(paths, "")
@@ -354,7 +354,8 @@ func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string,
 	paths = append(paths, "")
 	labels = append(labels, "custom")
 
-	idx, err := selectIndexTUI("Select skills source", items, 0)
+	defaultIndex := defaultSkillsSourceIndex(cfg, labels)
+	idx, err := selectIndexTUI("Select skills source", items, defaultIndex)
 	if err != nil {
 		return "", err
 	}
@@ -367,7 +368,7 @@ func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string,
 		if err != nil {
 			return "", err
 		}
-		return "repo-url:" + value, nil
+		return value, nil
 	case "custom":
 		return textInputTUI("Skills repo path", "Enter path to repo (folder containing skills/):", cwd)
 	default:
@@ -375,13 +376,13 @@ func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string,
 	}
 }
 
-func promptProjectPathTUI(cwd string) (string, error) {
+func promptProjectPathTUI(cwd string, cfg appConfig) (string, error) {
 	items := []string{
 		"Skip project install",
 		fmt.Sprintf("Use current directory (%s)", cwd),
 		"Custom project path",
 	}
-	idx, err := selectIndexTUI("Project path", items, 0)
+	idx, err := selectIndexTUI("Project path", items, defaultProjectChoiceIndex(cfg))
 	if err != nil {
 		return "", err
 	}
@@ -391,16 +392,20 @@ func promptProjectPathTUI(cwd string) (string, error) {
 	case 1:
 		return cwd, nil
 	default:
-		return textInputTUI("Project path", "Enter project path (folder containing .cursor/ or .claude/):", cwd)
+		defaultPath := strings.TrimSpace(cfg.ProjectPath)
+		if defaultPath == "" {
+			defaultPath = cwd
+		}
+		return textInputTUI("Project path", "Enter project path (folder containing .cursor/ or .claude/):", defaultPath)
 	}
 }
 
-func promptInstallModeTUI() (installer.Mode, error) {
+func promptInstallModeTUI(cfg appConfig) (installer.Mode, error) {
 	items := []string{
 		"Symlink (recommended)",
 		"Copy files",
 	}
-	idx, err := selectIndexTUI("Install mode", items, 0)
+	idx, err := selectIndexTUI("Install mode", items, defaultInstallModeIndex(cfg))
 	if err != nil {
 		return "", err
 	}
@@ -420,4 +425,56 @@ func promptOverwriteTUI() (bool, error) {
 		return false, err
 	}
 	return idx == 0, nil
+}
+
+func defaultSkillsSourceIndex(cfg appConfig, labels []string) int {
+	switch cfg.SkillRepoPath {
+	case "bundled":
+		return indexOfLabel(labels, "bundled")
+	case "cwd":
+		return indexOfLabel(labels, "cwd")
+	case "":
+		if idx := indexOfLabel(labels, "bundled"); idx >= 0 {
+			return idx
+		}
+		return indexOfLabel(labels, "cwd")
+	default:
+		if idx := indexOfLabel(labels, "configured"); idx >= 0 {
+			return idx
+		}
+	}
+	if idx := indexOfLabel(labels, "bundled"); idx >= 0 {
+		return idx
+	}
+	if idx := indexOfLabel(labels, "cwd"); idx >= 0 {
+		return idx
+	}
+	return 0
+}
+
+func defaultProjectChoiceIndex(cfg appConfig) int {
+	switch cfg.ProjectChoice {
+	case "cwd":
+		return 1
+	case "custom":
+		return 2
+	default:
+		return 0
+	}
+}
+
+func defaultInstallModeIndex(cfg appConfig) int {
+	if strings.EqualFold(cfg.InstallMode, string(installer.ModeCopy)) {
+		return 1
+	}
+	return 0
+}
+
+func indexOfLabel(labels []string, target string) int {
+	for i, label := range labels {
+		if label == target {
+			return i
+		}
+	}
+	return 0
 }

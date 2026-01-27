@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +14,8 @@ import (
 	"text/tabwriter"
 
 	"agent-skills/internal/installer"
+
+	"github.com/BurntSushi/toml"
 )
 
 type Options struct {
@@ -70,6 +71,7 @@ func Run(args []string, opts Options) error {
 		tw = tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(tw, "  --init\tCreate config file with defaults")
 		fmt.Fprintln(tw, "  -e, --edit\tEdit config in $EDITOR/$VISUAL")
+		fmt.Fprintln(tw, "  Config path\t~/.config/askill/config.toml")
 		_ = tw.Flush()
 	}
 	if err := fs.Parse(args[1:]); err != nil {
@@ -107,17 +109,21 @@ func Run(args []string, opts Options) error {
 		}
 
 		if !advanced {
-			if defaultRootErr == nil && defaultRoot != "" {
-				root = defaultRoot
-			} else {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return fmt.Errorf("get working directory: %w", err)
-				}
-				root = cwd
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
 			}
-			mode = installer.ModeSymlink
-			project = ""
+			defaultCfg := withDefaultConfig(cfg, defaultRoot, cwd)
+			resolvedRoot, cleanup, err := resolveSkillRepoPath(defaultCfg.SkillRepoPath, defaultRoot, cwd)
+			if err != nil {
+				return err
+			}
+			if cleanup != nil {
+				defer cleanup()
+			}
+			root = resolvedRoot
+			project = resolveProjectPath(defaultCfg, cwd)
+			mode = resolveInstallMode(defaultCfg)
 		} else {
 			selection, err := promptSourceSelectionTUI(defaultRoot, cfg)
 			if err != nil {
@@ -127,7 +133,7 @@ func Run(args []string, opts Options) error {
 			if selection.cleanup != nil {
 				defer selection.cleanup()
 			}
-			cfgPrompt, err := promptConfigTUI(root)
+			cfgPrompt, err := promptConfigTUI(root, cfg)
 			if err != nil {
 				return err
 			}
@@ -261,7 +267,10 @@ type config struct {
 }
 
 type appConfig struct {
-	RepoURL string `json:"repo_url"`
+	SkillRepoPath string `toml:"skill-repo-path"`
+	ProjectChoice string `toml:"project-choice"`
+	ProjectPath   string `toml:"project-path"`
+	InstallMode   string `toml:"install-mode"`
 }
 
 type configSelection struct {
@@ -269,14 +278,15 @@ type configSelection struct {
 	cleanup func()
 }
 
-func promptConfigTUI(root string) (config, error) {
+func promptConfigTUI(root string, cfg appConfig) (config, error) {
 	cwd, _ := os.Getwd()
-	project, err := promptProjectPathTUI(cwd)
+	defaultCfg := withDefaultConfig(cfg, "", cwd)
+	project, err := promptProjectPathTUI(cwd, defaultCfg)
 	if err != nil {
 		return config{}, err
 	}
 
-	mode, err := promptInstallModeTUI()
+	mode, err := promptInstallModeTUI(defaultCfg)
 	if err != nil {
 		return config{}, err
 	}
@@ -412,36 +422,42 @@ func promptInstallFlowTUI() (bool, error) {
 
 func promptSourceSelectionTUI(defaultRoot string, cfg appConfig) (configSelection, error) {
 	cwd, _ := os.Getwd()
-	root, err := promptSkillsRootTUI(defaultRoot, cfg, cwd)
+	defaultCfg := withDefaultConfig(cfg, defaultRoot, cwd)
+	root, err := promptSkillsRootTUI(defaultRoot, defaultCfg, cwd)
 	if err != nil {
 		return configSelection{}, err
 	}
 	if root == "" {
 		return configSelection{}, errors.New("no skills source selected")
 	}
-	resolved, cleanup, err := resolveSkillsRoot(root, cfg)
+	resolved, cleanup, err := resolveSkillRepoPath(root, defaultRoot, cwd)
 	if err != nil {
 		return configSelection{}, err
 	}
 	return configSelection{root: resolved, cleanup: cleanup}, nil
 }
 
-func resolveSkillsRoot(root string, cfg appConfig) (string, func(), error) {
-	if strings.HasPrefix(root, "github:") {
-		repo := strings.TrimSpace(strings.TrimPrefix(root, "github:"))
-		if repo == "" {
-			return "", nil, errors.New("empty GitHub repo")
+func resolveSkillRepoPath(value, defaultRoot, cwd string) (string, func(), error) {
+	switch strings.TrimSpace(value) {
+	case "", "bundled":
+		if defaultRoot != "" {
+			return defaultRoot, nil, nil
 		}
-		return cloneRepo(repo)
-	}
-	if strings.HasPrefix(root, "repo-url:") {
-		repo := strings.TrimSpace(strings.TrimPrefix(root, "repo-url:"))
-		if repo == "" {
-			return "", nil, errors.New("empty repo URL")
+		if cwd != "" {
+			return cwd, nil, nil
 		}
-		return cloneRepo(repo)
+	case "cwd":
+		if cwd != "" {
+			return cwd, nil, nil
+		}
 	}
-	return root, nil, nil
+	if value == "" {
+		return "", nil, errors.New("empty skills repo path")
+	}
+	if installer.ExistsDir(value) {
+		return value, nil, nil
+	}
+	return cloneRepo(value)
 }
 
 func cloneRepo(repo string) (string, func(), error) {
@@ -480,16 +496,15 @@ func loadConfig() (appConfig, error) {
 	if err != nil {
 		return appConfig{}, err
 	}
-	path := filepath.Join(configDir, "askill", "config.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
+	path := filepath.Join(configDir, "askill", "config.toml")
+	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return appConfig{}, nil
 		}
 		return appConfig{}, err
 	}
 	var cfg appConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return appConfig{}, err
 	}
 	return cfg, nil
@@ -561,7 +576,7 @@ func configFilePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, "askill", "config.json"), nil
+	return filepath.Join(configDir, "askill", "config.toml"), nil
 }
 
 func ensureConfigFile(path string) error {
@@ -573,13 +588,14 @@ func ensureConfigFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	defaults := appConfig{RepoURL: ""}
-	data, err := json.MarshalIndent(defaults, "", "  ")
-	if err != nil {
+	defaultRoot, _ := detectRepoRoot()
+	cwd, _ := os.Getwd()
+	defaults := withDefaultConfig(appConfig{}, defaultRoot, cwd)
+	var b strings.Builder
+	if err := toml.NewEncoder(&b).Encode(defaults); err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func editConfigFile(path string) error {
@@ -598,10 +614,46 @@ func editConfigFile(path string) error {
 }
 
 func printConfig(cfg appConfig) error {
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
+	if err := toml.NewEncoder(os.Stdout).Encode(cfg); err != nil {
 		return err
 	}
-	fmt.Println(string(data))
 	return nil
+}
+
+func withDefaultConfig(cfg appConfig, defaultRoot, cwd string) appConfig {
+	if strings.TrimSpace(cfg.SkillRepoPath) == "" {
+		if defaultRoot != "" {
+			cfg.SkillRepoPath = "bundled"
+		} else {
+			cfg.SkillRepoPath = "cwd"
+		}
+	}
+	if strings.TrimSpace(cfg.ProjectChoice) == "" {
+		cfg.ProjectChoice = "skip"
+	}
+	if strings.TrimSpace(cfg.InstallMode) == "" {
+		cfg.InstallMode = "symlink"
+	}
+	if cfg.ProjectChoice != "custom" {
+		cfg.ProjectPath = strings.TrimSpace(cfg.ProjectPath)
+	}
+	return cfg
+}
+
+func resolveProjectPath(cfg appConfig, cwd string) string {
+	switch cfg.ProjectChoice {
+	case "cwd":
+		return cwd
+	case "custom":
+		return strings.TrimSpace(cfg.ProjectPath)
+	default:
+		return ""
+	}
+}
+
+func resolveInstallMode(cfg appConfig) installer.Mode {
+	if strings.EqualFold(cfg.InstallMode, string(installer.ModeCopy)) {
+		return installer.ModeCopy
+	}
+	return installer.ModeSymlink
 }

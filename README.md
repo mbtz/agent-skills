@@ -70,14 +70,15 @@ askill config --init
 askill config --edit
 ```
 
-Config file path: `~/.config/askill/config.json`
+Config file path: `~/.config/askill/config.toml`
 
 Example:
 
-```json
-{
-  "repo_url": "https://github.com/mbtz/agent-skills"
-}
+```toml
+skill-repo-path = "https://github.com/mbtz/agent-skills"
+project-choice = "skip"
+project-path = ""
+install-mode = "symlink"
 ```
 
 Release (updates version, tags, and Homebrew formula):
