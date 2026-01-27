@@ -28,7 +28,6 @@ func Run(args []string, opts Options) error {
 	fs.SetOutput(os.Stderr)
 	repoRoot := fs.String("repo", "", "path to skills repo (defaults to current directory)")
 	projectPath := fs.String("project", "", "project path for project-local installs")
-	allSkills := fs.Bool("all", false, "install all skills without prompt")
 	copyMode := fs.Bool("copy", false, "copy files instead of symlink")
 	symlinkMode := fs.Bool("symlink", false, "force symlink mode")
 	showVersion := fs.Bool("version", false, "print version and exit")
@@ -53,7 +52,6 @@ func Run(args []string, opts Options) error {
 	if *symlinkMode {
 		mode = installer.ModeSymlink
 	}
-	all := *allSkills
 
 	if len(args) == 1 {
 		cfg, err := promptConfig()
@@ -63,7 +61,6 @@ func Run(args []string, opts Options) error {
 		root = cfg.root
 		project = cfg.project
 		mode = cfg.mode
-		all = cfg.all
 	}
 
 	if *copyMode && *symlinkMode {
@@ -98,7 +95,19 @@ func Run(args []string, opts Options) error {
 
 	selectedTargets := targets
 	if len(targets) > 1 {
-		indices := promptIndices("Select install targets (e.g. 1,3):", targetsSummary(targets))
+		var indices []int
+		var err error
+		if len(args) == 1 {
+			indices, err = selectIndicesTUI("Select install targets", targetsSummary(targets))
+			if err != nil {
+				if errors.Is(err, errCanceled) {
+					return nil
+				}
+				return err
+			}
+		} else {
+			indices = promptIndices("Select install targets (e.g. 1,3):", targetsSummary(targets))
+		}
 		selectedTargets = filterTargets(targets, indices)
 		if len(selectedTargets) == 0 {
 			return errors.New("no targets selected")
@@ -106,12 +115,22 @@ func Run(args []string, opts Options) error {
 	}
 
 	selectedSkills := skills
-	if !all {
-		indices := promptIndices("Select skills to install (e.g. 1,2,5):", skillsSummary(skills))
-		selectedSkills = filterSkills(skills, indices)
-		if len(selectedSkills) == 0 {
-			return errors.New("no skills selected")
+	var indices []int
+	var err error
+	if len(args) == 1 {
+		indices, err = selectIndicesTUI("Select skills to install", skillsSummary(skills))
+		if err != nil {
+			if errors.Is(err, errCanceled) {
+				return nil
+			}
+			return err
 		}
+	} else {
+		indices = promptIndices("Select skills to install (e.g. 1,2,5):", skillsSummary(skills))
+	}
+	selectedSkills = filterSkills(skills, indices)
+	if len(selectedSkills) == 0 {
+		return errors.New("no skills selected")
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -144,7 +163,6 @@ type config struct {
 	root    string
 	project string
 	mode    installer.Mode
-	all     bool
 }
 
 func promptConfig() (config, error) {
@@ -167,14 +185,10 @@ func promptConfig() (config, error) {
 		mode = installer.ModeCopy
 	}
 
-	allChoice := promptChoice("Install all skills without prompt?", []string{"no", "yes"})
-	all := allChoice == 2
-
 	return config{
 		root:    strings.TrimSpace(root),
 		project: strings.TrimSpace(project),
 		mode:    mode,
-		all:     all,
 	}, nil
 }
 

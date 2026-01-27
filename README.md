@@ -15,6 +15,7 @@ brew install askill
 Upgrade:
 
 ```bash
+brew update
 brew upgrade askill
 ```
 
@@ -23,6 +24,14 @@ Interactive (default):
 ```bash
 askill
 ```
+
+TUI controls:
+
+- `j`/`k` or arrows to move
+- `space` to select/deselect
+- `a` to toggle all
+- `enter` to confirm
+- `q` to quit
 
 From source:
 
@@ -40,12 +49,6 @@ Copy mode:
 
 ```bash
 ./askill --copy --project /path/to/your/project
-```
-
-Install all skills without the skills prompt:
-
-```bash
-./askill --all --project /path/to/your/project
 ```
 
 Release (updates version, tags, and Homebrew formula):
