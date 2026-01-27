@@ -116,14 +116,14 @@ func Run(args []string, opts Options) error {
 
 	selectedSkills := skills
 	var indices []int
-	var err error
+	var skillsErr error
 	if len(args) == 1 {
-		indices, err = selectIndicesTUI("Select skills to install", skillsSummary(skills))
-		if err != nil {
-			if errors.Is(err, errCanceled) {
+		indices, skillsErr = selectIndicesTUI("Select skills to install", skillsSummary(skills))
+		if skillsErr != nil {
+			if errors.Is(skillsErr, errCanceled) {
 				return nil
 			}
-			return err
+			return skillsErr
 		}
 	} else {
 		indices = promptIndices("Select skills to install (e.g. 1,2,5):", skillsSummary(skills))
