@@ -2,11 +2,9 @@ package cli
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"agent-skills/internal/installer"
 
@@ -708,13 +705,14 @@ func maybeUpgradeBanner(current string) string {
 	if current == "" {
 		return ""
 	}
-	latest := ""
-	if githubLatest, err := githubLatestVersion(); err == nil {
-		latest = githubLatest
-	} else if brewLatest, err := brewStableVersion(); err == nil {
-		latest = brewLatest
+	latest, err := brewLivecheckVersion()
+	if err != nil || latest == "" {
+		latest, err = brewStableVersion()
 	}
-	if latest == "" || compareVersions(current, latest) >= 0 {
+	if err != nil || latest == "" {
+		return ""
+	}
+	if compareVersions(current, latest) >= 0 {
 		return ""
 	}
 	return fmt.Sprintf("A newer askill version (%s) is available. Run: brew update && brew upgrade askill", latest)
@@ -738,44 +736,35 @@ func brewStableVersion() (string, error) {
 	return "", errors.New("askill formula not found")
 }
 
-type githubTag struct {
-	Name string `json:"name"`
-}
-
-func githubLatestVersion() (string, error) {
-	client := http.Client{Timeout: 2 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/mbtz/agent-skills/tags?per_page=100", nil)
-	if err != nil {
+func brewLivecheckVersion() (string, error) {
+	cmd := exec.Command("brew", "livecheck", "askill")
+	output, err := cmd.CombinedOutput()
+	latest := parseLivecheckOutput(string(output))
+	if err != nil && latest == "" {
 		return "", err
-	}
-	req.Header.Set("User-Agent", "askill")
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("github tags status: %s", resp.Status)
-	}
-	var tags []githubTag
-	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		return "", err
-	}
-	if len(tags) == 0 {
-		return "", errors.New("no tags found")
-	}
-	latest := strings.TrimSpace(strings.TrimPrefix(tags[0].Name, "v"))
-	for _, tag := range tags[1:] {
-		name := strings.TrimSpace(strings.TrimPrefix(tag.Name, "v"))
-		if compareVersions(name, latest) > 0 {
-			latest = name
-		}
 	}
 	if latest == "" {
-		return "", errors.New("no valid tag versions found")
+		return "", errors.New("askill livecheck result not found")
 	}
 	return latest, nil
+}
+
+func parseLivecheckOutput(output string) string {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "askill:") {
+			continue
+		}
+		parts := strings.Split(line, "==>")
+		if len(parts) < 2 {
+			continue
+		}
+		last := strings.TrimSpace(parts[len(parts)-1])
+		last = strings.TrimPrefix(last, "v")
+		return strings.TrimSpace(last)
+	}
+	return ""
 }
 
 func compareVersions(a, b string) int {
