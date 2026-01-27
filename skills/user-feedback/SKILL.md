@@ -1,11 +1,11 @@
 ---
 name: user-feedback
-description: "Monitor and process USER_FEEDBACK.md in the workspace root: check if new feedback exists, turn actionable feedback into tasks using the repo's preferred task system, and update the read timestamp after processing. Use when asked to check, read, triage, or act on USER_FEEDBACK.md."
+description: Use when asked to check, read, triage, or act on user feedback
 ---
 
 # User Feedback Protocol
 
-Use this skill to keep USER_FEEDBACK.md in sync with actionable tasks.
+Use this skill to keep USER_FEEDBACK.md in sync with actionable tasks. Monitor and process USER_FEEDBACK.md in the workspace root: check if new feedback exists, turn actionable feedback into tasks using the repo's preferred task system, and update the read timestamp after processing.
 
 ## File format
 
