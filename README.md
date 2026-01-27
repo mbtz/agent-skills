@@ -1,23 +1,33 @@
-## Agent Skills
+# Agent Skills
 
 This repo collects standardized `SKILL.md`-based skills and ships a small CLI
 that installs them into supported harnesses.
 
-### CLI: askill
+## Installation
 
-Homebrew (tap + install):
+### Homebrew Homebrew (tap + install)
 
 ```bash
 brew tap mbtz/agent-skills
 brew install askill
 ```
 
-Upgrade:
+### From Source
+
+```bash
+git clone https://github.com/mbtz/agent-skills.git
+
+go build ./cmd/askill
+```
+
+## Upgrade
 
 ```bash
 brew update
 brew upgrade askill
 ```
+
+## Usage
 
 Interactive (default):
 
@@ -29,40 +39,24 @@ Running without options opens the interactive TUI installer.
 
 TUI controls:
 
-- `j`/`k` or arrows to move
-- `space` to select/deselect
+- `j`/`k` or arrows to move up/down
 - `a` to toggle all
+- `space` to select/deselect
 - `enter` to confirm
-- `q` to quit
+- `q` to cancel & quit
 
-From source:
-
-```bash
-go build ./cmd/askill
-```
-
-Run from this repo (symlink mode by default):
-
-```bash
-./askill --project /path/to/your/project
-```
-
-Copy mode:
-
-```bash
-./askill --copy --project /path/to/your/project
-```
-
-Flags:
+Flags (for non-interactive installation of all skills available):
 
 - `-r`, `--repo`: path to skills repo (defaults to current directory)
 - `-p`, `--project`: project path for project-local installs
 - `-c`, `--copy`: copy files instead of symlink
 - `-s`, `--symlink`: force symlink mode
+- `-f`, `--from-config`: install all skills using config defaults
+---
 - `-v`, `--version`: print version and exit
 - `-h`, `--help`: show help
 
-Config:
+### Config
 
 ```bash
 askill config
@@ -70,7 +64,7 @@ askill config --init
 askill config --edit
 ```
 
-Config file path: `~/.config/askill/config.toml`
+Config file path: `~/Library/Application Support/askill/config.toml`
 
 Example:
 

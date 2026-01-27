@@ -39,6 +39,7 @@ func Run(args []string, opts Options) error {
 	var copyMode bool
 	var symlinkMode bool
 	var showVersion bool
+	var fromConfig bool
 
 	fs.StringVar(&repoRoot, "repo", "", "path to skills repo (defaults to current directory)")
 	fs.StringVar(&repoRoot, "r", "", "alias for --repo")
@@ -50,6 +51,8 @@ func Run(args []string, opts Options) error {
 	fs.BoolVar(&symlinkMode, "s", false, "alias for --symlink")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&showVersion, "v", false, "alias for --version")
+	fs.BoolVar(&fromConfig, "from-config", false, "install all skills using config defaults")
+	fs.BoolVar(&fromConfig, "f", false, "alias for --from-config")
 
 	fs.Usage = func() {
 		out := fs.Output()
@@ -63,6 +66,7 @@ func Run(args []string, opts Options) error {
 		fmt.Fprintln(tw, "  -p, --project\tProject path for project-local installs")
 		fmt.Fprintln(tw, "  -c, --copy\tCopy files instead of symlink")
 		fmt.Fprintln(tw, "  -s, --symlink\tForce symlink mode")
+		fmt.Fprintln(tw, "  -f, --from-config\tInstall all skills using config defaults")
 		fmt.Fprintln(tw, "  -v, --version\tPrint version and exit")
 		fmt.Fprintln(tw, "  -h, --help\tShow help")
 		_ = tw.Flush()
@@ -98,11 +102,27 @@ func Run(args []string, opts Options) error {
 
 	defaultRoot, defaultRootErr := detectRepoRoot()
 	cfg, cfgErr := loadConfig()
-	if len(args) == 1 && cfgErr != nil {
+	if (len(args) == 1 || fromConfig) && cfgErr != nil {
 		return cfgErr
 	}
 
-	if len(args) == 1 {
+	if fromConfig {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		defaultCfg := withDefaultConfig(cfg, defaultRoot, cwd)
+		resolvedRoot, cleanup, err := resolveSkillRepoPath(defaultCfg.SkillRepoPath, defaultRoot, cwd)
+		if err != nil {
+			return err
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+		root = resolvedRoot
+		project = resolveProjectPath(defaultCfg, cwd)
+		mode = resolveInstallMode(defaultCfg)
+	} else if len(args) == 1 {
 		advanced, err := promptInstallFlowTUI()
 		if err != nil {
 			return err
@@ -147,6 +167,19 @@ func Run(args []string, opts Options) error {
 
 	if copyMode && symlinkMode {
 		return errors.New("choose only one of --copy or --symlink")
+	}
+
+	if repoRoot != "" {
+		root = repoRoot
+	}
+	if projectPath != "" {
+		project = projectPath
+	}
+	if copyMode {
+		mode = installer.ModeCopy
+	}
+	if symlinkMode {
+		mode = installer.ModeSymlink
 	}
 
 	if root == "" {
