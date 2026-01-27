@@ -49,6 +49,8 @@ func Run(args []string, opts Options) error {
 	fs.Usage = func() {
 		out := fs.Output()
 		fmt.Fprintf(out, "Usage: %s [options]\n\n", cmdName)
+		fmt.Fprintln(out, "Run without options to open the interactive TUI installer.")
+		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Options:")
 		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(tw, "  -r, --repo\tPath to skills repo (defaults to current directory)")
@@ -390,7 +392,7 @@ func promptInstallFlowTUI() (bool, error) {
 		"Default install (bundled skills, symlink, no project path)",
 		"Advanced (choose source, project path, install mode)",
 	}
-	idx, err := selectIndexTUI("Install mode", items)
+	idx, err := selectIndexTUI("Install mode", items, 0)
 	if err != nil {
 		return false, err
 	}

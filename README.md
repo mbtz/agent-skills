@@ -25,6 +25,8 @@ Interactive (default):
 askill
 ```
 
+Running without options opens the interactive TUI installer.
+
 TUI controls:
 
 - `j`/`k` or arrows to move

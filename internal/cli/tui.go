@@ -18,6 +18,7 @@ var (
 	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true)
 	selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	defaultStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 )
 
 func selectIndicesTUI(title string, items []string, selected map[int]bool) ([]int, error) {
@@ -45,6 +46,7 @@ type multiSelectModel struct {
 	items     []string
 	cursor    int
 	selected  map[int]bool
+	defaults  map[int]bool
 	canceled  bool
 	confirmed bool
 }
@@ -53,10 +55,15 @@ func newMultiSelectModel(title string, items []string, selected map[int]bool) mu
 	if selected == nil {
 		selected = make(map[int]bool)
 	}
+	defaults := make(map[int]bool, len(selected))
+	for idx := range selected {
+		defaults[idx] = true
+	}
 	return multiSelectModel{
 		title:    title,
 		items:    items,
 		selected: selected,
+		defaults: defaults,
 	}
 }
 
@@ -110,7 +117,11 @@ func (m multiSelectModel) View() string {
 		if m.selected[i] {
 			check = selectedStyle.Render("x")
 		}
-		b.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, check, item))
+		label := ""
+		if m.defaults[i] {
+			label = " " + defaultStyle.Render("default")
+		}
+		b.WriteString(fmt.Sprintf("%s [%s] %s%s\n", cursor, check, item, label))
 	}
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("j/k or ↑/↓ to move, space to select, a to toggle all, enter to confirm, q to quit"))
@@ -131,11 +142,11 @@ func (m multiSelectModel) selectedIndices() []int {
 	return out
 }
 
-func selectIndexTUI(title string, items []string) (int, error) {
+func selectIndexTUI(title string, items []string, defaultIndex int) (int, error) {
 	if len(items) == 0 {
 		return -1, errors.New("no items to select")
 	}
-	model := newSingleSelectModel(title, items)
+	model := newSingleSelectModel(title, items, defaultIndex)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {
@@ -156,14 +167,19 @@ type singleSelectModel struct {
 	items         []string
 	cursor        int
 	selectedIndex int
+	defaultIndex  int
 	canceled      bool
 }
 
-func newSingleSelectModel(title string, items []string) singleSelectModel {
+func newSingleSelectModel(title string, items []string, defaultIndex int) singleSelectModel {
+	if defaultIndex < 0 || defaultIndex >= len(items) {
+		defaultIndex = 0
+	}
 	return singleSelectModel{
 		title:         title,
 		items:         items,
 		selectedIndex: -1,
+		defaultIndex:  defaultIndex,
 	}
 }
 
@@ -203,7 +219,11 @@ func (m singleSelectModel) View() string {
 		if m.cursor == i {
 			cursor = cursorStyle.Render(">")
 		}
-		b.WriteString(fmt.Sprintf("%s %s\n", cursor, item))
+		label := ""
+		if i == m.defaultIndex {
+			label = " " + defaultStyle.Render("default")
+		}
+		b.WriteString(fmt.Sprintf("%s %s%s\n", cursor, item, label))
 	}
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("j/k or ↑/↓ to move, enter to confirm, q to quit"))
@@ -332,7 +352,7 @@ func promptSkillsRootTUI(defaultRoot string, cfg appConfig, cwd string) (string,
 	paths = append(paths, "")
 	labels = append(labels, "custom")
 
-	idx, err := selectIndexTUI("Select skills source", items)
+	idx, err := selectIndexTUI("Select skills source", items, 0)
 	if err != nil {
 		return "", err
 	}
@@ -359,7 +379,7 @@ func promptProjectPathTUI(cwd string) (string, error) {
 		fmt.Sprintf("Use current directory (%s)", cwd),
 		"Custom project path",
 	}
-	idx, err := selectIndexTUI("Project path", items)
+	idx, err := selectIndexTUI("Project path", items, 0)
 	if err != nil {
 		return "", err
 	}
@@ -378,7 +398,7 @@ func promptInstallModeTUI() (installer.Mode, error) {
 		"Symlink (recommended)",
 		"Copy files",
 	}
-	idx, err := selectIndexTUI("Install mode", items)
+	idx, err := selectIndexTUI("Install mode", items, 0)
 	if err != nil {
 		return "", err
 	}
@@ -390,10 +410,10 @@ func promptInstallModeTUI() (installer.Mode, error) {
 
 func promptOverwriteTUI() (bool, error) {
 	items := []string{
-		"Overwrite existing skills",
 		"Skip existing skills",
+		"Overwrite existing skills",
 	}
-	idx, err := selectIndexTUI("Overwrite existing skills?", items)
+	idx, err := selectIndexTUI("Overwrite existing skills?", items, 0)
 	if err != nil {
 		return false, err
 	}
