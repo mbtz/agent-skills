@@ -431,7 +431,7 @@ func promptOverwriteTUI() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return idx == 0, nil
+	return idx == 1, nil
 }
 
 func defaultSkillsSourceIndex(cfg appConfig, labels []string) int {
