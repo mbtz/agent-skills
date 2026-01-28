@@ -271,7 +271,7 @@ func Run(args []string, opts Options) error {
 		}
 		for _, skill := range selectedSkills {
 			dest := filepath.Join(target.Path, filepath.Base(skill.Path))
-			if _, err := os.Stat(dest); err == nil {
+			if _, err := os.Lstat(dest); err == nil {
 				if len(args) == 1 {
 					if !overwriteAll {
 						fmt.Printf("Skipping %s for %s\n", skill.Name, target.Label)
