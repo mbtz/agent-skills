@@ -72,7 +72,7 @@ Example:
 skill-repo-path = "https://github.com/mbtz/agent-skills"
 project-choice = "skip"
 project-path = ""
-install-mode = "symlink"
+install-mode = "copy"
 ```
 
 Release (updates version, tags, and Homebrew formula):

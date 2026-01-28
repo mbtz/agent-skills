@@ -409,14 +409,14 @@ func promptProjectPathTUI(cwd string, cfg appConfig) (string, error) {
 
 func promptInstallModeTUI(cfg appConfig) (installer.Mode, error) {
 	items := []string{
-		"Symlink (recommended)",
-		"Copy files",
+		"Copy files (recommended)",
+		"Symlink",
 	}
 	idx, err := selectIndexTUI("Install mode", items, defaultInstallModeIndex(cfg), "")
 	if err != nil {
 		return "", err
 	}
-	if idx == 1 {
+	if idx == 0 {
 		return installer.ModeCopy, nil
 	}
 	return installer.ModeSymlink, nil
@@ -472,9 +472,9 @@ func defaultProjectChoiceIndex(cfg appConfig) int {
 
 func defaultInstallModeIndex(cfg appConfig) int {
 	if strings.EqualFold(cfg.InstallMode, string(installer.ModeCopy)) {
-		return 1
+		return 0
 	}
-	return 0
+	return 1
 }
 
 func indexOfLabel(labels []string, target string) int {

@@ -93,7 +93,7 @@ func Run(args []string, opts Options) error {
 
 	root := repoRoot
 	project := projectPath
-	mode := installer.ModeSymlink
+	mode := installer.ModeCopy
 	if copyMode {
 		mode = installer.ModeCopy
 	}
@@ -445,7 +445,7 @@ func defaultSelectAll(count int) map[int]bool {
 
 func promptInstallFlowTUI(banner string) (bool, error) {
 	items := []string{
-		"Default install (bundled skills, symlink, no project path)",
+		"Default install (bundled skills, copy, no project path)",
 		"Advanced (choose source, project path, install mode)",
 	}
 	idx, err := selectIndexTUI("Install mode", items, 0, banner)
@@ -667,7 +667,7 @@ func withDefaultConfig(cfg appConfig, defaultRoot, cwd string) appConfig {
 		cfg.ProjectChoice = "skip"
 	}
 	if strings.TrimSpace(cfg.InstallMode) == "" {
-		cfg.InstallMode = "symlink"
+		cfg.InstallMode = "copy"
 	}
 	if cfg.ProjectChoice != "custom" {
 		cfg.ProjectPath = strings.TrimSpace(cfg.ProjectPath)
@@ -690,7 +690,7 @@ func resolveInstallMode(cfg appConfig) installer.Mode {
 	if strings.EqualFold(cfg.InstallMode, string(installer.ModeCopy)) {
 		return installer.ModeCopy
 	}
-	return installer.ModeSymlink
+	return installer.ModeCopy
 }
 
 type brewInfo struct {
