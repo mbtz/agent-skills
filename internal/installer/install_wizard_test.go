@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +143,89 @@ func TestInstallWizardRequiredValue(t *testing.T) {
 
 	if err := ApplyInstallWizardAnswers(skillDir, wizard, map[string]string{}); err == nil {
 		t.Fatal("expected required value error")
+	}
+}
+
+func TestInstallWizardActionPromptsAndExecution(t *testing.T) {
+	skillDir := t.TempDir()
+	scriptPath := filepath.Join(skillDir, "scripts", "setup.sh")
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf "%s|%s" "${ASKILL_TARGET_TYPE}" "$1" > "${ASKILL_SKILL_DIR}/action-result.txt"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	configPath := filepath.Join(skillDir, "scripts", "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"vault_root":"~/vault"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	spec := `{
+  "version": 1,
+  "files": [
+    {
+      "path": "scripts/config.json",
+      "format": "json",
+      "fields": [
+        {"key": "vault_root", "prompt": "Vault root", "required": true}
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "install-hook",
+      "type": "run-script",
+      "prompt": "Install hook?",
+      "script": "scripts/setup.sh",
+      "args": ["{{target_path}}"],
+      "target_types": ["codex-global"]
+    }
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(skillDir, InstallWizardFileName), []byte(spec), 0o644); err != nil {
+		t.Fatalf("write wizard: %v", err)
+	}
+
+	wizard, err := LoadSkillInstallWizard(skillDir)
+	if err != nil {
+		t.Fatalf("load wizard: %v", err)
+	}
+	if wizard == nil {
+		t.Fatal("expected wizard")
+	}
+
+	prompts := BuildInstallWizardActionPrompts(wizard, []TargetType{TargetCodexGlobal})
+	if len(prompts) != 1 {
+		t.Fatalf("expected 1 action prompt, got %d", len(prompts))
+	}
+	if prompts[0].ID != "install-hook" {
+		t.Fatalf("unexpected action prompt id: %s", prompts[0].ID)
+	}
+
+	prompts = BuildInstallWizardActionPrompts(wizard, []TargetType{TargetClaudeGlobal})
+	if len(prompts) != 0 {
+		t.Fatalf("expected no action prompts for non-matching target, got %d", len(prompts))
+	}
+
+	if err := ApplyInstallWizardActions(skillDir, wizard, map[string]bool{"install-hook": true}, InstallWizardApplyContext{
+		TargetType: TargetCodexGlobal,
+		TargetPath: "/tmp/codex-target",
+	}); err != nil {
+		t.Fatalf("apply actions: %v", err)
+	}
+
+	resultPath := filepath.Join(skillDir, "action-result.txt")
+	result, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read action result: %v", err)
+	}
+	if got := strings.TrimSpace(string(result)); got != "codex-global|/tmp/codex-target" {
+		t.Fatalf("unexpected action result: %q", got)
 	}
 }

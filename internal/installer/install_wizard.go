@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -13,10 +14,11 @@ import (
 const InstallWizardFileName = "INSTALL_WIZARD.json"
 
 type InstallWizard struct {
-	Version     int                 `json:"version"`
-	Title       string              `json:"title"`
-	Description string              `json:"description,omitempty"`
-	Files       []InstallWizardFile `json:"files"`
+	Version     int                   `json:"version"`
+	Title       string                `json:"title"`
+	Description string                `json:"description,omitempty"`
+	Files       []InstallWizardFile   `json:"files"`
+	Actions     []InstallWizardAction `json:"actions,omitempty"`
 }
 
 type InstallWizardFile struct {
@@ -39,6 +41,28 @@ type InstallWizardQuestion struct {
 	Prompt   string
 	Default  string
 	Required bool
+}
+
+type InstallWizardAction struct {
+	ID             string       `json:"id"`
+	Type           string       `json:"type"`
+	Prompt         string       `json:"prompt,omitempty"`
+	Script         string       `json:"script,omitempty"`
+	Args           []string     `json:"args,omitempty"`
+	DefaultEnabled bool         `json:"default_enabled,omitempty"`
+	TargetTypes    []TargetType `json:"target_types,omitempty"`
+}
+
+type InstallWizardActionPrompt struct {
+	ID             string
+	Prompt         string
+	DefaultEnabled bool
+}
+
+type InstallWizardApplyContext struct {
+	TargetType TargetType
+	TargetPath string
+	Answers    map[string]string
 }
 
 func LoadSkillInstallWizard(skillDir string) (*InstallWizard, error) {
@@ -100,6 +124,29 @@ func BuildInstallWizardQuestions(skillDir string, wizard *InstallWizard) ([]Inst
 	return questions, nil
 }
 
+func BuildInstallWizardActionPrompts(wizard *InstallWizard, selectedTargetTypes []TargetType) []InstallWizardActionPrompt {
+	if wizard == nil || len(wizard.Actions) == 0 {
+		return nil
+	}
+
+	prompts := make([]InstallWizardActionPrompt, 0, len(wizard.Actions))
+	for _, action := range wizard.Actions {
+		if !action.appliesToAnyTarget(selectedTargetTypes) {
+			continue
+		}
+		prompt := strings.TrimSpace(action.Prompt)
+		if prompt == "" {
+			prompt = fmt.Sprintf("Enable %s?", action.ID)
+		}
+		prompts = append(prompts, InstallWizardActionPrompt{
+			ID:             action.ID,
+			Prompt:         prompt,
+			DefaultEnabled: action.DefaultEnabled,
+		})
+	}
+	return prompts
+}
+
 func ApplyInstallWizardAnswers(skillDir string, wizard *InstallWizard, answers map[string]string) error {
 	if wizard == nil {
 		return nil
@@ -143,6 +190,36 @@ func ApplyInstallWizardAnswers(skillDir string, wizard *InstallWizard, answers m
 	return nil
 }
 
+func ApplyInstallWizardActions(skillDir string, wizard *InstallWizard, selectedActions map[string]bool, context InstallWizardApplyContext) error {
+	if wizard == nil || len(wizard.Actions) == 0 {
+		return nil
+	}
+
+	for _, action := range wizard.Actions {
+		if !action.appliesToTargetType(context.TargetType) {
+			continue
+		}
+		enabled := action.DefaultEnabled
+		if value, ok := selectedActions[action.ID]; ok {
+			enabled = value
+		}
+		if !enabled {
+			continue
+		}
+
+		switch action.Type {
+		case "run-script":
+			if err := runInstallWizardScriptAction(skillDir, action, context); err != nil {
+				return fmt.Errorf("run action %s: %w", action.ID, err)
+			}
+		default:
+			return fmt.Errorf("unsupported action type %q", action.Type)
+		}
+	}
+
+	return nil
+}
+
 func (wizard *InstallWizard) validate() error {
 	if wizard.Version == 0 {
 		wizard.Version = 1
@@ -158,18 +235,11 @@ func (wizard *InstallWizard) validate() error {
 
 	for i := range wizard.Files {
 		fileSpec := &wizard.Files[i]
-		fileSpec.Path = strings.TrimSpace(fileSpec.Path)
-		if fileSpec.Path == "" {
-			return fmt.Errorf("files[%d].path is required", i)
+		cleanPath, err := cleanRelativePath(fileSpec.Path)
+		if err != nil {
+			return fmt.Errorf("files[%d].path: %w", i, err)
 		}
-		if filepath.IsAbs(fileSpec.Path) {
-			return fmt.Errorf("files[%d].path must be relative", i)
-		}
-		cleaned := filepath.Clean(fileSpec.Path)
-		if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("files[%d].path points outside skill root", i)
-		}
-		fileSpec.Path = cleaned
+		fileSpec.Path = cleanPath
 
 		format := strings.ToLower(strings.TrimSpace(fileSpec.Format))
 		if format == "" {
@@ -201,6 +271,52 @@ func (wizard *InstallWizard) validate() error {
 			}
 		}
 	}
+
+	actionIDs := map[string]struct{}{}
+	for i := range wizard.Actions {
+		action := &wizard.Actions[i]
+		action.ID = strings.TrimSpace(action.ID)
+		if action.ID == "" {
+			return fmt.Errorf("actions[%d].id is required", i)
+		}
+		if _, exists := actionIDs[action.ID]; exists {
+			return fmt.Errorf("actions[%d].id %q is duplicated", i, action.ID)
+		}
+		actionIDs[action.ID] = struct{}{}
+
+		action.Type = strings.ToLower(strings.TrimSpace(action.Type))
+		if action.Type == "" {
+			action.Type = "run-script"
+		}
+
+		action.Prompt = strings.TrimSpace(action.Prompt)
+
+		switch action.Type {
+		case "run-script":
+			scriptPath, err := cleanRelativePath(action.Script)
+			if err != nil {
+				return fmt.Errorf("actions[%d].script: %w", i, err)
+			}
+			action.Script = scriptPath
+			for argIndex, arg := range action.Args {
+				action.Args[argIndex] = strings.TrimSpace(arg)
+			}
+		default:
+			return fmt.Errorf("actions[%d].type %q is not supported", i, action.Type)
+		}
+
+		for targetIndex, targetType := range action.TargetTypes {
+			trimmed := TargetType(strings.TrimSpace(string(targetType)))
+			if trimmed == "" {
+				return fmt.Errorf("actions[%d].target_types[%d] is empty", i, targetIndex)
+			}
+			if !isSupportedTargetType(trimmed) {
+				return fmt.Errorf("actions[%d].target_types[%d] %q is not supported", i, targetIndex, trimmed)
+			}
+			action.TargetTypes[targetIndex] = trimmed
+		}
+	}
+
 	return nil
 }
 
@@ -302,12 +418,9 @@ func wizardQuestionID(filePath, key string) string {
 }
 
 func resolveWithinSkill(skillDir, relativePath string) (string, error) {
-	if filepath.IsAbs(relativePath) {
-		return "", fmt.Errorf("path must be relative: %s", relativePath)
-	}
-	cleaned := filepath.Clean(relativePath)
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path %s points outside skill root", relativePath)
+	cleaned, err := cleanRelativePath(relativePath)
+	if err != nil {
+		return "", err
 	}
 	fullPath := filepath.Join(skillDir, cleaned)
 	rel, err := filepath.Rel(skillDir, fullPath)
@@ -318,4 +431,113 @@ func resolveWithinSkill(skillDir, relativePath string) (string, error) {
 		return "", fmt.Errorf("path %s points outside skill root", relativePath)
 	}
 	return fullPath, nil
+}
+
+func cleanRelativePath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("path is required")
+	}
+	if filepath.IsAbs(value) {
+		return "", fmt.Errorf("path must be relative: %s", value)
+	}
+	cleaned := filepath.Clean(value)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path %s points outside skill root", value)
+	}
+	return cleaned, nil
+}
+
+func isSupportedTargetType(targetType TargetType) bool {
+	switch targetType {
+	case TargetCodexGlobal, TargetClaudeGlobal, TargetClaudeProject, TargetCursorGlobal, TargetCursorProject:
+		return true
+	default:
+		return false
+	}
+}
+
+func (action InstallWizardAction) appliesToAnyTarget(selectedTargetTypes []TargetType) bool {
+	if len(action.TargetTypes) == 0 {
+		return true
+	}
+	if len(selectedTargetTypes) == 0 {
+		return false
+	}
+	for _, selected := range selectedTargetTypes {
+		if action.appliesToTargetType(selected) {
+			return true
+		}
+	}
+	return false
+}
+
+func (action InstallWizardAction) appliesToTargetType(targetType TargetType) bool {
+	if len(action.TargetTypes) == 0 {
+		return true
+	}
+	for _, allowed := range action.TargetTypes {
+		if allowed == targetType {
+			return true
+		}
+	}
+	return false
+}
+
+func runInstallWizardScriptAction(skillDir string, action InstallWizardAction, context InstallWizardApplyContext) error {
+	scriptPath, err := resolveWithinSkill(skillDir, action.Script)
+	if err != nil {
+		return err
+	}
+
+	args := make([]string, 0, len(action.Args))
+	for _, arg := range action.Args {
+		args = append(args, interpolateInstallWizardActionArg(arg, skillDir, context))
+	}
+
+	command := []string{}
+	ext := strings.ToLower(filepath.Ext(scriptPath))
+	switch ext {
+	case ".py":
+		command = append(command, "python3", scriptPath)
+	case ".sh":
+		command = append(command, "bash", scriptPath)
+	default:
+		command = append(command, scriptPath)
+	}
+	command = append(command, args...)
+
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Dir = skillDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	env := append(os.Environ(),
+		"ASKILL_SKILL_DIR="+skillDir,
+		"ASKILL_TARGET_TYPE="+string(context.TargetType),
+		"ASKILL_TARGET_PATH="+context.TargetPath,
+	)
+	if len(context.Answers) > 0 {
+		payload, err := json.Marshal(context.Answers)
+		if err == nil {
+			env = append(env, "ASKILL_WIZARD_ANSWERS_JSON="+string(payload))
+		}
+	}
+	cmd.Env = env
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func interpolateInstallWizardActionArg(raw string, skillDir string, context InstallWizardApplyContext) string {
+	homeDir, _ := os.UserHomeDir()
+	replacer := strings.NewReplacer(
+		"{{skill_dir}}", skillDir,
+		"{{target_type}}", string(context.TargetType),
+		"{{target_path}}", context.TargetPath,
+		"{{home_dir}}", homeDir,
+	)
+	return replacer.Replace(raw)
 }

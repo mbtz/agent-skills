@@ -21,5 +21,23 @@
         }
       ]
     }
+  ],
+  "actions": [
+    {
+      "id": "install-post-operation-hook",
+      "type": "run-script",
+      "prompt": "Install and enable Codex post-operation hook for automatic capture?",
+      "script": "scripts/install_post_operation_hook.py",
+      "args": [
+        "--hooks-dir",
+        "{{home_dir}}/.codex/hooks",
+        "--codex-config",
+        "{{home_dir}}/.codex/config.toml"
+      ],
+      "target_types": [
+        "codex-global"
+      ],
+      "default_enabled": false
+    }
   ]
 }

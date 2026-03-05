@@ -64,6 +64,8 @@ Supported wizard behavior:
 
 - Writes JSON files
 - Updates string values by dot-path keys (for example `vault_root` or `nested.path`)
+- Optional post-install `actions` (prompted opt-in), currently `run-script`
+- Action target filtering via `target_types` (for example `codex-global` only)
 
 Wizard example:
 
@@ -83,6 +85,15 @@ Wizard example:
           "required": true
         }
       ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "install-hook",
+      "type": "run-script",
+      "prompt": "Install local hook?",
+      "script": "scripts/install_hook.py",
+      "target_types": ["codex-global"]
     }
   ]
 }

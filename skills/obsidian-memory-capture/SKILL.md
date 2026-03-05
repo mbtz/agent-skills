@@ -12,8 +12,10 @@ Use this skill to ingest Codex session outputs into raw inbox notes with dedupli
 - Script: `scripts/capture_session_answers.py`
 - Config: `scripts/config.json`
 - Install wizard: `INSTALL_WIZARD.json`
+- Hook installer: `scripts/install_post_operation_hook.py`
+- Hook templates: `scripts/hooks/post_operation_obsidian_memory.{sh,py}`
 
-When installed via `askill`, the installer prompts for machine-specific paths and writes `scripts/config.json`. You can still edit the file manually later.
+When installed via `askill`, the installer prompts for machine-specific paths and writes `scripts/config.json`. It also offers an opt-in action to install and enable the Codex post-operation hook locally (`~/.codex/hooks` + `~/.codex/config.toml`). You can still edit any file manually later.
 
 ## Standard usage
 
@@ -37,17 +39,18 @@ python3 scripts/capture_session_answers.py --dry-run
 
 ## Post-Operation Hook (recommended)
 
-Enable Codex post-operation capture in `~/.codex/config.toml`:
+If you opt in during `askill` installation, hook files and config are installed automatically.
+Manual setup is still supported. Add to `~/.codex/config.toml`:
 
 ```toml
-notify = ["/Users/vh/.codex/hooks/post_operation_obsidian_memory.sh"]
+notify = ["~/.codex/hooks/post_operation_obsidian_memory.sh"]
 notifications = ["agent-turn-complete"]
 ```
 
 Hook scripts:
 
-- `/Users/vh/.codex/hooks/post_operation_obsidian_memory.sh`
-- `/Users/vh/.codex/hooks/post_operation_obsidian_memory.py`
+- `~/.codex/hooks/post_operation_obsidian_memory.sh`
+- `~/.codex/hooks/post_operation_obsidian_memory.py`
 
 ## Rules
 

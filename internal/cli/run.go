@@ -265,7 +265,7 @@ func Run(args []string, opts Options) error {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	wizardPlans, err := collectInstallWizardPlans(selectedSkills, len(args) == 1, reader)
+	wizardPlans, err := collectInstallWizardPlans(selectedSkills, selectedTargets, len(args) == 1, reader)
 	if err != nil {
 		if errors.Is(err, errCanceled) {
 			return nil
@@ -301,6 +301,13 @@ func Run(args []string, opts Options) error {
 					return fmt.Errorf("configure %s for %s: %w", skill.Name, target.Label, err)
 				}
 				fmt.Printf("Configured %s for %s\n", skill.Name, target.Label)
+				if err := installer.ApplyInstallWizardActions(dest, plan.wizard, plan.actionChoices, installer.InstallWizardApplyContext{
+					TargetType: target.Type,
+					TargetPath: target.Path,
+					Answers:    plan.answers,
+				}); err != nil {
+					return fmt.Errorf("run post-install actions for %s on %s: %w", skill.Name, target.Label, err)
+				}
 			}
 			fmt.Printf("Installed %s to %s (%s)\n", skill.Name, target.Label, mode)
 		}
@@ -328,8 +335,9 @@ type configSelection struct {
 }
 
 type installWizardPlan struct {
-	wizard  *installer.InstallWizard
-	answers map[string]string
+	wizard        *installer.InstallWizard
+	answers       map[string]string
+	actionChoices map[string]bool
 }
 
 func promptConfigTUI(root string, cfg appConfig) (config, error) {
@@ -352,7 +360,8 @@ func promptConfigTUI(root string, cfg appConfig) (config, error) {
 	}, nil
 }
 
-func collectInstallWizardPlans(selectedSkills []installer.Skill, useTUI bool, reader *bufio.Reader) (map[string]installWizardPlan, error) {
+func collectInstallWizardPlans(selectedSkills []installer.Skill, selectedTargets []installer.Target, useTUI bool, reader *bufio.Reader) (map[string]installWizardPlan, error) {
+	targetTypes := selectedTargetTypes(selectedTargets)
 	plans := make(map[string]installWizardPlan)
 	for _, skill := range selectedSkills {
 		wizard, err := installer.LoadSkillInstallWizard(skill.Path)
@@ -380,9 +389,23 @@ func collectInstallWizardPlans(selectedSkills []installer.Skill, useTUI bool, re
 			return nil, err
 		}
 
+		actionPrompts := installer.BuildInstallWizardActionPrompts(wizard, targetTypes)
+		actionChoices := map[string]bool{}
+		if len(actionPrompts) > 0 {
+			if useTUI {
+				actionChoices, err = promptInstallWizardActionChoicesTUI(skill.Name, wizard, actionPrompts)
+			} else {
+				actionChoices, err = promptInstallWizardActionChoicesCLI(skill.Name, wizard, actionPrompts, reader)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		plans[skill.Path] = installWizardPlan{
-			wizard:  wizard,
-			answers: answers,
+			wizard:        wizard,
+			answers:       answers,
+			actionChoices: actionChoices,
 		}
 	}
 	return plans, nil
@@ -476,6 +499,68 @@ func promptInstallWizardCLI(skillName string, wizard *installer.InstallWizard, q
 	return answers, nil
 }
 
+func promptInstallWizardActionChoicesTUI(skillName string, wizard *installer.InstallWizard, prompts []installer.InstallWizardActionPrompt) (map[string]bool, error) {
+	title := strings.TrimSpace(wizard.Title)
+	if title == "" {
+		title = fmt.Sprintf("Configure %s", skillName)
+	}
+
+	choices := make(map[string]bool, len(prompts))
+	for i, prompt := range prompts {
+		actionTitle := title
+		if len(prompts) > 1 {
+			actionTitle = fmt.Sprintf("%s Actions (%d/%d)", title, i+1, len(prompts))
+		}
+		items := []string{
+			"Enable",
+			"Skip",
+		}
+		defaultIndex := 1
+		if prompt.DefaultEnabled {
+			defaultIndex = 0
+		}
+		index, err := selectIndexTUI(actionTitle, items, defaultIndex, prompt.Prompt)
+		if err != nil {
+			return nil, err
+		}
+		choices[prompt.ID] = index == 0
+	}
+	return choices, nil
+}
+
+func promptInstallWizardActionChoicesCLI(skillName string, wizard *installer.InstallWizard, prompts []installer.InstallWizardActionPrompt, reader *bufio.Reader) (map[string]bool, error) {
+	if reader == nil {
+		reader = bufio.NewReader(os.Stdin)
+	}
+
+	title := strings.TrimSpace(wizard.Title)
+	if title == "" {
+		title = fmt.Sprintf("Configure %s", skillName)
+	}
+	fmt.Printf("\n%s: optional actions\n", title)
+
+	choices := make(map[string]bool, len(prompts))
+	for _, prompt := range prompts {
+		value, err := confirmWithDefault(reader, prompt.Prompt, prompt.DefaultEnabled)
+		if err != nil {
+			return nil, err
+		}
+		choices[prompt.ID] = value
+	}
+	return choices, nil
+}
+
+func selectedTargetTypes(targets []installer.Target) []installer.TargetType {
+	if len(targets) == 0 {
+		return nil
+	}
+	result := make([]installer.TargetType, 0, len(targets))
+	for _, target := range targets {
+		result = append(result, target.Type)
+	}
+	return result
+}
+
 func promptIndices(prompt string, items []string) []int {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println(prompt)
@@ -526,6 +611,26 @@ func confirm(reader *bufio.Reader, prompt string) bool {
 	text, _ := reader.ReadString('\n')
 	text = strings.TrimSpace(strings.ToLower(text))
 	return text == "y" || text == "yes"
+}
+
+func confirmWithDefault(reader *bufio.Reader, prompt string, defaultYes bool) (bool, error) {
+	if reader == nil {
+		reader = bufio.NewReader(os.Stdin)
+	}
+	suffix := "[y/N]"
+	if defaultYes {
+		suffix = "[Y/n]"
+	}
+	fmt.Printf("%s %s: ", prompt, suffix)
+	text, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read confirmation input: %w", err)
+	}
+	text = strings.TrimSpace(strings.ToLower(text))
+	if text == "" {
+		return defaultYes, nil
+	}
+	return text == "y" || text == "yes", nil
 }
 
 func targetsSummary(targets []installer.Target) []string {
