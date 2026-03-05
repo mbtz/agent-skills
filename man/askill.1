@@ -13,6 +13,9 @@ askill installs SKILL.md based skills into supported harnesses.
 Running
 .B askill
 without options opens the interactive TUI installer.
+If a skill contains
+.BR INSTALL_WIZARD.json ,
+askill runs a setup prompt during install and writes machine-specific values into the installed skill files.
 .SH OPTIONS
 .TP
 .BR \-r ", " \-\-repo " " \fIPATH\fR

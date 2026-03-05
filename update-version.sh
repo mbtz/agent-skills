@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-tap_repo="${TAP_REPO:-$repo_root/../homebrew-agent-skills}"
+tap_repo="${TAP_REPO:-$repo_root/../homebrew-askill}"
 cd "$repo_root"
 
 cli_file="$repo_root/internal/cli/version.go"

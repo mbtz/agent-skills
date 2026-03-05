@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "title": "Obsidian Memory Capture Setup",
+  "description": "Configure machine-specific paths used by this skill.",
+  "files": [
+    {
+      "path": "scripts/config.json",
+      "format": "json",
+      "fields": [
+        {
+          "key": "vault_root",
+          "prompt": "Path to your Obsidian vault root",
+          "default": "~/path/to/your/obsidian-vault",
+          "required": true
+        },
+        {
+          "key": "sessions_root",
+          "prompt": "Path to Codex sessions directory",
+          "default": "~/.codex/sessions",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

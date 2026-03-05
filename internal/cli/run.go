@@ -265,6 +265,14 @@ func Run(args []string, opts Options) error {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
+	wizardPlans, err := collectInstallWizardPlans(selectedSkills, len(args) == 1, reader)
+	if err != nil {
+		if errors.Is(err, errCanceled) {
+			return nil
+		}
+		return err
+	}
+
 	for _, target := range selectedTargets {
 		if err := os.MkdirAll(target.Path, 0o755); err != nil {
 			return fmt.Errorf("create target %s: %w", target.Path, err)
@@ -287,6 +295,12 @@ func Run(args []string, opts Options) error {
 			}
 			if err := installer.InstallSkill(skill.Path, dest, mode); err != nil {
 				return fmt.Errorf("install %s to %s: %w", skill.Name, target.Label, err)
+			}
+			if plan, ok := wizardPlans[skill.Path]; ok {
+				if err := installer.ApplyInstallWizardAnswers(dest, plan.wizard, plan.answers); err != nil {
+					return fmt.Errorf("configure %s for %s: %w", skill.Name, target.Label, err)
+				}
+				fmt.Printf("Configured %s for %s\n", skill.Name, target.Label)
 			}
 			fmt.Printf("Installed %s to %s (%s)\n", skill.Name, target.Label, mode)
 		}
@@ -313,6 +327,11 @@ type configSelection struct {
 	cleanup func()
 }
 
+type installWizardPlan struct {
+	wizard  *installer.InstallWizard
+	answers map[string]string
+}
+
 func promptConfigTUI(root string, cfg appConfig) (config, error) {
 	cwd, _ := os.Getwd()
 	defaultCfg := withDefaultConfig(cfg, "", cwd)
@@ -331,6 +350,130 @@ func promptConfigTUI(root string, cfg appConfig) (config, error) {
 		project: strings.TrimSpace(project),
 		mode:    mode,
 	}, nil
+}
+
+func collectInstallWizardPlans(selectedSkills []installer.Skill, useTUI bool, reader *bufio.Reader) (map[string]installWizardPlan, error) {
+	plans := make(map[string]installWizardPlan)
+	for _, skill := range selectedSkills {
+		wizard, err := installer.LoadSkillInstallWizard(skill.Path)
+		if err != nil {
+			return nil, fmt.Errorf("load install wizard for %s: %w", skill.Name, err)
+		}
+		if wizard == nil {
+			continue
+		}
+		questions, err := installer.BuildInstallWizardQuestions(skill.Path, wizard)
+		if err != nil {
+			return nil, fmt.Errorf("build install wizard questions for %s: %w", skill.Name, err)
+		}
+		if len(questions) == 0 {
+			continue
+		}
+
+		var answers map[string]string
+		if useTUI {
+			answers, err = promptInstallWizardTUI(skill.Name, wizard, questions)
+		} else {
+			answers, err = promptInstallWizardCLI(skill.Name, wizard, questions, reader)
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		plans[skill.Path] = installWizardPlan{
+			wizard:  wizard,
+			answers: answers,
+		}
+	}
+	return plans, nil
+}
+
+func promptInstallWizardTUI(skillName string, wizard *installer.InstallWizard, questions []installer.InstallWizardQuestion) (map[string]string, error) {
+	title := strings.TrimSpace(wizard.Title)
+	if title == "" {
+		title = fmt.Sprintf("Configure %s", skillName)
+	}
+
+	answers := make(map[string]string, len(questions))
+	for i, question := range questions {
+		titleWithIndex := title
+		if len(questions) > 1 {
+			titleWithIndex = fmt.Sprintf("%s (%d/%d)", title, i+1, len(questions))
+		}
+
+		parts := []string{}
+		if desc := strings.TrimSpace(wizard.Description); desc != "" {
+			parts = append(parts, desc)
+		}
+		parts = append(parts, question.Prompt)
+		parts = append(parts, fmt.Sprintf("%s -> %s", question.FilePath, question.Key))
+		if question.Required {
+			parts = append(parts, "Required value.")
+		}
+		prompt := strings.Join(parts, "\n")
+
+		for {
+			value, err := textInputTUI(titleWithIndex, prompt, question.Default)
+			if err != nil {
+				return nil, err
+			}
+			value = strings.TrimSpace(value)
+			if value == "" {
+				value = strings.TrimSpace(question.Default)
+			}
+			if question.Required && value == "" {
+				continue
+			}
+			answers[question.ID] = value
+			break
+		}
+	}
+
+	return answers, nil
+}
+
+func promptInstallWizardCLI(skillName string, wizard *installer.InstallWizard, questions []installer.InstallWizardQuestion, reader *bufio.Reader) (map[string]string, error) {
+	if reader == nil {
+		reader = bufio.NewReader(os.Stdin)
+	}
+
+	title := strings.TrimSpace(wizard.Title)
+	if title == "" {
+		title = fmt.Sprintf("Configure %s", skillName)
+	}
+	fmt.Printf("\n%s\n", title)
+	if desc := strings.TrimSpace(wizard.Description); desc != "" {
+		fmt.Println(desc)
+	}
+
+	answers := make(map[string]string, len(questions))
+	for i, question := range questions {
+		for {
+			fmt.Printf("%d/%d %s (%s -> %s)", i+1, len(questions), question.Prompt, question.FilePath, question.Key)
+			if question.Default != "" {
+				fmt.Printf(" [%s]", question.Default)
+			}
+			fmt.Print(": ")
+
+			text, err := reader.ReadString('\n')
+			if err != nil {
+				return nil, fmt.Errorf("read install wizard input: %w", err)
+			}
+
+			value := strings.TrimSpace(text)
+			if value == "" {
+				value = strings.TrimSpace(question.Default)
+			}
+			if question.Required && value == "" {
+				fmt.Println("Value is required.")
+				continue
+			}
+			answers[question.ID] = value
+			break
+		}
+	}
+
+	return answers, nil
 }
 
 func promptIndices(prompt string, items []string) []int {

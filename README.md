@@ -52,9 +52,41 @@ Flags (for non-interactive installation of all skills available):
 - `-c`, `--copy`: copy files instead of symlink
 - `-s`, `--symlink`: force symlink mode
 - `-f`, `--from-config`: install all skills using config defaults
----
 - `-v`, `--version`: print version and exit
 - `-h`, `--help`: show help
+
+### Skill install wizard
+
+Skills that require machine-specific setup can include `INSTALL_WIZARD.json` in the skill root.
+When present, `askill` prompts for those values during installation and writes them into the installed skill files.
+
+Supported wizard behavior:
+
+- Writes JSON files
+- Updates string values by dot-path keys (for example `vault_root` or `nested.path`)
+
+Wizard example:
+
+```json
+{
+  "version": 1,
+  "title": "Skill setup",
+  "files": [
+    {
+      "path": "scripts/config.json",
+      "format": "json",
+      "fields": [
+        {
+          "key": "vault_root",
+          "prompt": "Path to your vault root",
+          "default": "~/path/to/vault",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
+```
 
 ### Config
 
