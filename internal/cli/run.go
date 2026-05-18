@@ -214,7 +214,12 @@ func Run(args []string, opts Options) error {
 		return fmt.Errorf("no install targets found under %s. Create a harness folder or pass --project", homeDir)
 	}
 
-	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
+	sort.Slice(skills, func(i, j int) bool {
+		if skills[i].RelativePath == skills[j].RelativePath {
+			return skills[i].Name < skills[j].Name
+		}
+		return skills[i].RelativePath < skills[j].RelativePath
+	})
 
 	var overwriteAll bool
 	selectedTargets := targets
@@ -278,14 +283,18 @@ func Run(args []string, opts Options) error {
 			return fmt.Errorf("create target %s: %w", target.Path, err)
 		}
 		for _, skill := range selectedSkills {
-			dest := filepath.Join(target.Path, filepath.Base(skill.Path))
+			installPath := skill.RelativePath
+			if installPath == "" {
+				installPath = filepath.Base(skill.Path)
+			}
+			dest := filepath.Join(target.Path, installPath)
 			if _, err := os.Lstat(dest); err == nil {
 				if len(args) == 1 {
 					if !overwriteAll {
 						fmt.Printf("Skipping %s for %s\n", skill.Name, target.Label)
 						continue
 					}
-				} else if !confirm(reader, fmt.Sprintf("%s exists in %s. Overwrite? [y/N]: ", filepath.Base(skill.Path), target.Label)) {
+				} else if !confirm(reader, fmt.Sprintf("%s exists in %s. Overwrite? [y/N]: ", installPath, target.Label)) {
 					fmt.Printf("Skipping %s for %s\n", skill.Name, target.Label)
 					continue
 				}
@@ -652,7 +661,11 @@ func skillsSummary(skills []installer.Skill) []string {
 		if desc == "" {
 			desc = "no description"
 		}
-		items = append(items, fmt.Sprintf("%s - %s", skill.Name, desc))
+		label := skill.Name
+		if skill.RelativePath != "" && skill.RelativePath != skill.Name {
+			label = fmt.Sprintf("%s (%s)", skill.RelativePath, skill.Name)
+		}
+		items = append(items, fmt.Sprintf("%s - %s", label, desc))
 	}
 	return items
 }

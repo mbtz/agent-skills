@@ -19,9 +19,10 @@ const (
 )
 
 type Skill struct {
-	Name        string
-	Description string
-	Path        string
+	Name         string
+	Description  string
+	Path         string
+	RelativePath string
 }
 
 type TargetType string
@@ -70,10 +71,18 @@ func DiscoverSkills(skillsRoot string) ([]Skill, error) {
 		if name == "" {
 			name = filepath.Base(path)
 		}
+		relativePath, err := filepath.Rel(skillsRoot, path)
+		if err != nil {
+			return fmt.Errorf("resolve relative skill path for %s: %w", path, err)
+		}
+		if relativePath == "." {
+			relativePath = filepath.Base(path)
+		}
 		skills = append(skills, Skill{
-			Name:        name,
-			Description: desc,
-			Path:        path,
+			Name:         name,
+			Description:  desc,
+			Path:         path,
+			RelativePath: filepath.Clean(relativePath),
 		})
 		return fs.SkipDir
 	})
