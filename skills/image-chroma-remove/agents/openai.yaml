@@ -1,0 +1,7 @@
+interface:
+  display_name: "Image Chroma Remove"
+  short_description: "Remove flat keyed backgrounds"
+  brand_color: "#00B86B"
+  default_prompt: "Use $image-chroma-remove to remove the chroma-key background from this sprite and save a transparent PNG."
+policy:
+  allow_implicit_invocation: true

@@ -9,11 +9,13 @@ import hashlib
 import json
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Iterable
 
 
 CAPTURE_FORMAT = "codex-session-jsonl-v1"
+UNKNOWN_MACHINE_TAG = "unknown-machine"
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +51,12 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="Extra assistant phases to include.",
+    )
+    parser.add_argument(
+        "--machine-tag",
+        type=str,
+        default=os.environ.get("AGENT_MACHINE_TAG", ""),
+        help="Machine tag to stamp raw capture metadata (default: AGENT_MACHINE_TAG or hostname).",
     )
     parser.add_argument(
         "--dry-run",
@@ -215,6 +223,29 @@ def normalize_slug(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower()).strip("-")
 
 
+def normalize_machine_tag(value: str) -> str:
+    normalized = normalize_slug(value)
+    if normalized:
+        return normalized
+    return UNKNOWN_MACHINE_TAG
+
+
+def resolve_machine_tag(argument_value: str, config: dict) -> str:
+    if argument_value.strip():
+        return normalize_machine_tag(argument_value)
+
+    config_value = config.get("machine_tag", "")
+    if isinstance(config_value, str) and config_value.strip():
+        return normalize_machine_tag(config_value)
+
+    for env_name in ("AGENT_MACHINE_TAG", "HOSTNAME", "HOST"):
+        candidate = os.environ.get(env_name, "").strip()
+        if candidate:
+            return normalize_machine_tag(candidate)
+
+    return normalize_machine_tag(socket.gethostname())
+
+
 def normalize_projects(projects: list[str], aliases: dict[str, str]) -> list[str]:
     output: set[str] = set()
     for project in projects:
@@ -231,6 +262,7 @@ def normalize_projects(projects: list[str], aliases: dict[str, str]) -> list[str
 def render_frontmatter(metadata: dict) -> str:
     preferred = [
         "source_agent",
+        "machine_tag",
         "run_id",
         "status",
         "projects",
@@ -259,6 +291,7 @@ def ensure_note_and_frontmatter(
     note_path: Path,
     capture_date: dt.date,
     source_agent: str,
+    machine_tag: str,
     session_id: str,
     projects: list[str],
     include_phases: list[str],
@@ -296,6 +329,7 @@ def ensure_note_and_frontmatter(
     metadata.update(
         {
             "source_agent": metadata.get("source_agent", source_agent),
+            "machine_tag": metadata.get("machine_tag", machine_tag),
             "run_id": metadata.get("run_id", session_id),
             "status": metadata.get("status", "raw"),
             "projects": merged_projects,
@@ -339,6 +373,7 @@ def scan_label(start_line: int, total_lines: int) -> str:
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
+    machine_tag = resolve_machine_tag(args.machine_tag, config)
 
     vault_root = expand_path(str(config["vault_root"]))
     inbox_root = Path(str(config.get("inbox_root", "00-Inbox")))
@@ -358,10 +393,11 @@ def main() -> None:
 
     session_id = args.session_id.strip()
     session_file = args.session_file.resolve() if args.session_file else find_session_file(sessions_root, session_id)
-    if not session_id:
-        match = re.search(r"([0-9a-f]{8}-[0-9a-f-]{27,})\.jsonl$", session_file.name)
-        if match:
-            session_id = match.group(1)
+    session_file_match = re.search(r"([0-9a-f]{8}-[0-9a-f-]{27,})\.jsonl$", session_file.name)
+    if args.session_file and session_file_match:
+        session_id = session_file_match.group(1)
+    elif not session_id and session_file_match:
+        session_id = session_file_match.group(1)
     if not session_id:
         raise SystemExit("Unable to resolve session id.")
 
@@ -380,10 +416,21 @@ def main() -> None:
     if start_line < 0 or start_line > len(lines):
         start_line = 0
 
+    candidate_events = list(
+        iter_new_events(lines=lines, start_line=start_line, include_phases=include_phase_set)
+    )
+    if not candidate_events and not note_path.exists():
+        print(
+            f"No captureable entries in {session_file.name} "
+            f"(scanned {scan_label(start_line, len(lines))})."
+        )
+        return
+
     ensure_note_and_frontmatter(
         note_path=note_path,
         capture_date=capture_date,
         source_agent=str(config.get("source_agent", "codex")),
+        machine_tag=machine_tag,
         session_id=session_id,
         projects=projects,
         include_phases=sorted(include_phase_set),
@@ -393,10 +440,14 @@ def main() -> None:
     )
 
     logged_ids = load_logged_event_ids(note_path)
-    candidate_events = list(
-        iter_new_events(lines=lines, start_line=start_line, include_phases=include_phase_set)
-    )
     new_events = [event for event in candidate_events if event["event_id"] not in logged_ids]
+
+    if not new_events:
+        print(
+            f"No new entries in {session_file.name} "
+            f"(scanned {scan_label(start_line, len(lines))} of {session_file.name})."
+        )
+        return
 
     append_events(note_path, new_events, args.dry_run)
 

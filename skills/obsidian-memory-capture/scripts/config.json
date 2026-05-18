@@ -1,14 +1,15 @@
 {
-  "vault_root": "~/Code/mbtz--agent-vault/repos/Agents",
-  "inbox_root": "00-Inbox",
-  "sessions_root": "~/.codex/sessions",
   "default_projects": [
     "obsidian-memory"
   ],
-  "source_agent": "codex",
+  "inbox_root": "00-Inbox",
   "include_phases": [
     "final_answer"
   ],
   "note_filename": "raw-capture.md",
-  "state_filename": ".capture-state.json"
+  "sessions_root": "~/.codex/sessions",
+  "source_agent": "codex",
+  "state_filename": ".capture-state.json",
+  "vault_root": "~/path/to/your/obsidian-vault",
+  "machine_tag": ""
 }
